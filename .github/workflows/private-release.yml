@@ -1,0 +1,59 @@
+name: Private extension release
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validate version and prevent replacement of release assets
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/private-release.js prepare
+      - name: Install dependencies
+        if: steps.prepare.outputs.skip != 'true'
+        run: npm ci
+      - name: Build the customized distribution and run tests
+        if: steps.prepare.outputs.skip != 'true'
+        run: |
+          npm run build
+          npm test
+          node scripts/verify-patch-idempotency.js
+      - name: Package VSIX
+        if: steps.prepare.outputs.skip != 'true'
+        env:
+          VSIX_PATH: ${{ steps.prepare.outputs.vsix }}
+        run: ./node_modules/.bin/vsce package --no-dependencies --out "$VSIX_PATH"
+      - name: Verify package and write SHA-256
+        if: steps.prepare.outputs.skip != 'true'
+        run: node scripts/private-release.js verify
+      - name: Upload to private GitHub Release
+        if: steps.prepare.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/private-release.js publish

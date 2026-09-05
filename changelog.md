@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Private GitHub Release updates on installed macOS and Windows extensions,
+  with persistent six-hour checks, automatic verified VSIX installation,
+  cross-window coordination, and a reload prompt.
+- Commands to check updates immediately and configure a repository-scoped token
+  in SecretStorage or use VS Code's managed GitHub authentication session.
+- User settings for automatic updates, the check interval, and named profiles.
+- A tag/release-triggered GitHub Actions workflow that builds the customized
+  distribution, runs tests, packages a version-matched VSIX, and uploads it with
+  SHA-256 to the private GitHub Release without overwriting older assets.
+
+### Changed
+
+- Added a supported `npm run build` task using distribution patches and syntax
+  checks, preserving the original vendor bundle and editable-grid decorators.
+- Prepared version 0.0.10 as the first manually installed updater-enabled build.
+
 ## [0.0.9] - 2026-09-05
 
 ### Added

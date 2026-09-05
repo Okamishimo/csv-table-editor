@@ -1,5 +1,6 @@
 node_modules/
 *.vsix
+*.vsix.sha256
 .DS_Store
 npm-debug.log*
 coverage/

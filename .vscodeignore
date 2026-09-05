@@ -3,3 +3,6 @@ test/**
 scripts/**
 .vsixmanifest
 *.vsix
+*.vsix.sha256
+.github/**
+AGENTS.md

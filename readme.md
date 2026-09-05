@@ -67,6 +67,8 @@ reopen or save with any of these via the clickable encoding label:
 No additional setup. Encoding conversion is handled by the bundled
 [`iconv-lite`](https://www.npmjs.com/package/iconv-lite) library.
 
+Private automatic updates require the one-time authentication setup below.
+
 The editable grid is an in-memory editor. Local files larger than 64 MiB open
 in a streaming, read-only preview instead. Scrolling near either end loads the
 adjacent 100 rows, so you can move forward and backward without keeping the
@@ -78,6 +80,129 @@ For files no larger than 511 MiB, **Enable Editing** can explicitly reopen the
 full in-memory grid after a warning. Files above that JavaScript hard limit,
 including multi-gigabyte CSV files, remain in the streaming preview. Adjust
 the automatic preview threshold with `csvTableEditor.maxFileSizeMB`.
+
+## Private automatic updates
+
+Stable updates come exclusively from the private
+[`Okamishimo/csv-table-editor` GitHub Releases](https://github.com/Okamishimo/csv-table-editor/releases).
+This extension is packaged as a VSIX and is never published to the public
+Marketplace. The extension ID remains `Edgar-Dang.csv-table-editor` so existing
+installations are upgraded in place.
+
+### First installation on each computer
+
+1. Sign in to GitHub with access to the private repository and download
+   `csv-table-editor-0.0.10-enhanced.vsix` (or a newer stable release). Versions
+   up to 0.0.9 do not contain the updater, so they need this one manual upgrade.
+2. In VS Code, run **Extensions: Install from VSIX…**, select the file, and
+   reload VS Code. The updater supports installed desktop extensions on macOS
+   and Windows. It does not update Remote SSH, WSL, container, web, or Extension
+   Development Host installations.
+3. Run **CSV Table Editor: Configure Private Update Authentication** and choose:
+   - **Fine-grained GitHub token** (recommended for least privilege): create a
+     token with resource owner `Okamishimo`, select **Only select repositories →
+     csv-table-editor**, and grant **Contents: Read-only** (Metadata read access
+     is implicit). Paste it into the password input. It is stored only in
+     VS Code SecretStorage, not settings, files, Git, logs, or CLI arguments.
+   - **Sign in with GitHub**: use VS Code's built-in authentication provider.
+     VS Code manages the session; this extension does not store a copy. Private
+     repository access requires the broader OAuth `repo` scope. Choose the
+     fine-grained token if you want to limit access to this one repository.
+4. Run **CSV Table Editor: Check for Extension Updates** to verify access.
+   If you use a named VS Code profile, first set
+   `csvTableEditor.updates.profileName` to its exact name in User Settings.
+   Default profiles need no extra setting. No `code` PATH setup is required.
+
+SecretStorage credentials do not sync between computers. Configure authentication
+once on each computer/profile; repeat it when a token expires or is revoked.
+Organization-managed repositories may require token approval or SSO authorization.
+**Disconnect private updates** deletes this extension's token and stops using its
+GitHub session; it does not sign other extensions out of GitHub.
+
+### Update behavior and settings
+
+- `csvTableEditor.updates.enabled` defaults to `true`. Disable it to stop
+  automatic checks; the manual command still works.
+- `csvTableEditor.updates.checkIntervalHours` defaults to `6` (range 1–168).
+  The startup check waits 30 seconds; a lightweight timer checks whether an API
+  request is due every five minutes. Attempt times persist across restarts, and
+  failed requests also observe the interval. Manual checks bypass this interval
+  but honor GitHub's rate-limit retry delay.
+- Background checks never prompt for authentication. Configure it explicitly
+  once using the command above. Draft/prerelease releases and versions no newer
+  than the installed package are skipped.
+- A new stable version is downloaded automatically with its SHA-256 file.
+  Downloads are streamed, limited to 128 MiB, and time out after two minutes per
+  request. The updater verifies the checksum, package identity, and exact version
+  before calling this running VS Code installation's CLI with
+  `--install-extension <vsix> --force`. It uses separate process arguments on
+  both platforms and targets the current user-data and extension directories.
+- After installation, **Reload Window** activates the new version; **Later**
+  keeps the current window running. Other open windows need their own reload.
+  A local lock prevents concurrent installs across windows sharing the same
+  profile, and successful installation state prevents repeated downloads.
+- Failures are isolated from CSV editing and logged to **Output → CSV Table
+  Editor Updates**. Manual failures also show a message. Missing releases,
+  unfinished release assets, expired credentials, and network errors can be
+  retried with the manual command after the underlying problem is fixed.
+
+### GitHub setup and publishing
+
+The workflow is [`.github/workflows/private-release.yml`](.github/workflows/private-release.yml).
+Enable GitHub Actions for the repository and allow the workflow's job-level
+`contents: write` permission. No custom repository Secrets, PAT, or Marketplace
+publisher token are needed: the upload uses GitHub's short-lived `GITHUB_TOKEN`.
+Client read tokens belong only in each computer's VS Code SecretStorage.
+
+The workflow runs when a `v*` tag is pushed or a Release is published. It checks
+out that tag, verifies it matches `package.json`, installs dependencies with
+`npm ci`, runs `npm run build` and the tests, checks patch idempotency, and runs
+`vsce package --no-dependencies`. This repository's build applies the validated
+distribution patches and checks JavaScript syntax; it does not run the obsolete
+webpack compile task because the original TypeScript/webpack project is absent.
+
+For the first updater release, commit all 0.0.10 changes, push the branch, then:
+
+```sh
+git tag v0.0.10
+git push origin v0.0.10
+```
+
+For subsequent releases, increment the version and lockfile, update the changelog,
+commit every intended change, then push the matching new tag. For example:
+
+```sh
+npm version patch --no-git-tag-version
+# Update changelog.md and review the changes before committing.
+git add .
+git commit -m "Release 0.0.11"
+git push origin main
+git tag v0.0.11
+git push origin v0.0.11
+```
+
+Alternatively, publish a GitHub Release using that same tag. Use stable `vX.Y.Z`
+tags. The workflow creates a draft when necessary, uploads the canonical VSIX and
+`<vsix>.sha256`, then publishes it. On an existing published Release it uploads
+the assets directly; wait for Actions to finish before checking for updates.
+The updater follows GitHub's **latest stable release**; when publishing an older
+maintenance version, keep the desired newest version marked Latest in GitHub.
+
+Existing assets are never overwritten. Duplicate tag/release events skip a
+release that already has both assets. A partially uploaded release fails safely:
+retain the existing asset, use a new patch version/tag for a fresh build, and
+leave the incomplete release as a draft. Do not move or reuse a published tag.
+Every release keeps one canonical `csv-table-editor-<version>-enhanced.vsix`.
+
+For local packaging after tests pass, use the installed VSCE binary with the same
+canonical filename (on Windows, `node_modules\\.bin\\vsce.cmd`). Never overwrite
+an existing version. GitHub Actions verifies runtime modules, the vendor bundle,
+manifest, documentation, license, and media are present and generates SHA-256.
+
+Authentication and installation references:
+[VS Code SecretStorage](https://code.visualstudio.com/api/references/vscode-api#SecretStorage),
+[GitHub release asset permissions](https://docs.github.com/en/rest/releases/assets),
+[VS Code CLI](https://code.visualstudio.com/docs/configure/command-line).
 
 ## Known limitations
 

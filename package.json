@@ -2,18 +2,18 @@
 	"name": "csv-table-editor",
 	"displayName": "CSV Table Editor — Encoding & History",
 	"description": "Open, view and edit CSV/TSV files as a spreadsheet grid: sort, filter, search, pick the encoding (UTF-8, UTF-16, Shift_JIS, Windows-1252/1258...), keep a save history and compare versions as a side-by-side table diff.",
-	"version": "0.0.9",
+	"version": "0.0.10",
 	"publisher": "Edgar-Dang",
 	"license": "MIT",
 	"icon": "media/icon.png",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/minlong8111/csv-table-editor.git"
+		"url": "https://github.com/Okamishimo/csv-table-editor.git"
 	},
 	"bugs": {
-		"url": "https://github.com/minlong8111/csv-table-editor/issues"
+		"url": "https://github.com/Okamishimo/csv-table-editor/issues"
 	},
-	"homepage": "https://github.com/minlong8111/csv-table-editor#readme",
+	"homepage": "https://github.com/Okamishimo/csv-table-editor#readme",
 	"categories": [
 		"Data Science",
 		"Formatters",
@@ -36,7 +36,9 @@
 		"vscode": "^1.85.0"
 	},
 	"main": "./dist/extension.js",
-	"activationEvents": [],
+	"activationEvents": [
+		"onStartupFinished"
+	],
 	"contributes": {
 		"configuration": {
 			"title": "CSV Table Editor",
@@ -54,6 +56,26 @@
 					"maximum": 511,
 					"scope": "window",
 					"description": "Maximum CSV/TSV size in MiB loaded directly into the editable in-memory grid. Larger local files open in a paged, streaming, read-only preview. Raising this value can use substantial memory."
+				},
+				"csvTableEditor.updates.enabled": {
+					"type": "boolean",
+					"default": true,
+					"scope": "application",
+					"description": "Automatically install stable updates from the private Okamishimo/csv-table-editor GitHub Releases after authentication is configured."
+				},
+				"csvTableEditor.updates.checkIntervalHours": {
+					"type": "number",
+					"default": 6,
+					"minimum": 1,
+					"maximum": 168,
+					"scope": "application",
+					"description": "Hours between automatic private update checks. Failed attempts also respect this interval."
+				},
+				"csvTableEditor.updates.profileName": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"description": "Exact VS Code profile name for CLI updates when using a named profile. Leave empty for the default profile."
 				}
 			}
 		},
@@ -71,16 +93,29 @@
 				],
 				"priority": "default"
 			}
+		],
+		"commands": [
+			{
+				"command": "csvTableEditor.checkForUpdates",
+				"title": "Check for Extension Updates",
+				"category": "CSV Table Editor"
+			},
+			{
+				"command": "csvTableEditor.configureUpdateAuthentication",
+				"title": "Configure Private Update Authentication",
+				"category": "CSV Table Editor"
+			}
 		]
 	},
 	"scripts": {
-		"vscode:prepublish": "npm run patch:dist && npm test",
+		"vscode:prepublish": "npm run build && npm test",
 		"compile": "webpack",
 		"watch": "webpack --watch",
 		"package": "npm run patch:dist && npm test",
 		"lint": "eslint src --ext ts",
 		"patch:dist": "node scripts/patch-distribution.js",
-		"test": "node --test test/*.test.js"
+		"test": "node --test test/*.test.js",
+		"build": "npm run patch:dist && node scripts/check-syntax.js"
 	},
 	"dependencies": {
 		"iconv-lite": "^0.6.3"
@@ -93,7 +128,9 @@
 		"ts-loader": "^9.5.1",
 		"typescript": "^5.3.3",
 		"webpack": "^5.90.0",
-		"webpack-cli": "^5.1.4"
+		"webpack-cli": "^5.1.4",
+		"yauzl": "^3.4.0",
+		"yazl": "^2.5.1"
 	},
 	"__metadata": {
 		"installedTimestamp": 1788502981135,

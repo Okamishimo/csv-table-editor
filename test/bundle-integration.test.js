@@ -25,6 +25,8 @@ function loadBundleInternals(vscodeStub = {}) {
   const extensionModule = new Module(path.join(path.dirname(bundlePath), "extension.integration.js"), module);
   extensionModule.filename = path.join(path.dirname(bundlePath), "extension.integration.js");
   extensionModule.paths = Module._nodeModulePaths(path.dirname(bundlePath));
+  const originalRequire = extensionModule.require.bind(extensionModule);
+  extensionModule.require = (request) => request === "vscode" ? vscodeStub : originalRequire(request);
 
   const originalLoad = Module._load;
   Module._load = function loadWithVscodeStub(request, parent, isMain) {
@@ -36,8 +38,29 @@ function loadBundleInternals(vscodeStub = {}) {
   } finally {
     Module._load = originalLoad;
   }
+  extensionModule.exports.__testRequire.extensionExports = extensionModule.exports;
   return extensionModule.exports.__testRequire;
 }
+
+test("actual bundle starts the updater after registering the editor and contains initialization failures", () => {
+  const registered = [];
+  const vscode = {
+    commands: { registerCommand: (name) => { registered.push(name); return { dispose() {} }; } },
+    window: { createOutputChannel: () => ({ appendLine() {}, dispose() {} }) },
+  };
+  const webpackRequire = loadBundleInternals(vscode);
+  const provider = webpackRequire(248).CsvEditorProvider;
+  let editorRegistrations = 0;
+  provider.register = () => { editorRegistrations++; return { dispose() {} }; };
+  const context = { subscriptions: [], globalStorageUri: { fsPath: os.tmpdir() }, extension: { packageJSON: { version: "0.0.10" } } };
+  webpackRequire.extensionExports.activate(context);
+  assert.equal(editorRegistrations, 1);
+  assert.deepEqual(registered, ["csvTableEditor.checkForUpdates", "csvTableEditor.configureUpdateAuthentication"]);
+  for (const disposable of context.subscriptions) disposable.dispose();
+  vscode.window.createOutputChannel = () => { throw new Error("updater unavailable"); };
+  assert.doesNotThrow(() => webpackRequire.extensionExports.activate(context));
+  assert.equal(editorRegistrations, 2, "updater failures must not prevent the editor from registering");
+});
 
 test("patched distribution uses the enhanced detector", () => {
   const webpackRequire = loadBundleInternals();

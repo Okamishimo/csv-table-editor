@@ -29,6 +29,11 @@ if (bundle.includes(fontOnlyWebview)) {
 
 const replacements = [
   {
+    name: "private updater activation",
+    from: 'e.activate=function(e){e.subscriptions.push(t.CsvEditorProvider.register(e))}',
+    to: 'e.activate=function(e){e.subscriptions.push(t.CsvEditorProvider.register(e));try{require("../src/private-updater").activate(e,require("vscode"))}catch(e){console.error("CSV Table Editor: updater initialization failed")}}',
+  },
+  {
     name: "document-open detection call",
     from: 'o=(0,c.detectFromBom)(r)??"utf8",a=(0,c.decode)(r,o)',
     to: 'o=(0,c.detectEncoding)(r),a=(0,c.decode)(r,o)',
