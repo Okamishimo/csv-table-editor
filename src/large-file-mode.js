@@ -13,6 +13,7 @@ const {
   getFontFamily,
   watchFontFamily,
 } = require("./font-settings");
+const { buildFileIndex } = require("./large-file-index");
 
 const MIB = 1024 * 1024;
 const SAMPLE_BYTES = 256 * 1024;
@@ -28,6 +29,8 @@ const EDITABLE_OVERRIDES = new Set();
 const SEARCH_MATCH_LIMIT = 20000;
 /** How often a running scan reports what it has found so far. */
 const SEARCH_REPORT_ROWS = 4000;
+/** How often a running scan shows the reader the page it is looking at. */
+const SCAN_FOLLOW_INTERVAL_MS = 200;
 
 async function createLargeDocumentIfNeeded(uri, openContext, vscode, encodingApi) {
   if (!uri || uri.scheme === "untitled") return null;
@@ -75,6 +78,37 @@ class LargeCsvDocument {
     this._onDidChangeContent = new vscode.EventEmitter();
     this.onDidChangeContent = this._onDidChangeContent.event;
     this._pager = null;
+    this._index = null;
+    this._indexToken = 0;
+  }
+
+  get totalRows() {
+    return this._index && this._index.complete ? this._index.totalRows : 0;
+  }
+
+  get indexComplete() {
+    return Boolean(this._index && this._index.complete);
+  }
+
+  /**
+   * Read the file once to learn how many rows it has and where each page
+   * begins. The preview needs the count for a scrollbar that means something,
+   * and the offsets so the reader can drag it anywhere.
+   */
+  async buildIndex(hooks = {}) {
+    const token = ++this._indexToken;
+    const index = await buildFileIndex(this.uri.fsPath, this.encodingKey, PAGE_ROWS, {
+      cancelled: () => token !== this._indexToken || (hooks.cancelled ? hooks.cancelled() : false),
+      progress: hooks.progress,
+    });
+    if (token !== this._indexToken || !index.complete) return null;
+    this._index = index;
+    if (this._pager) this._pager.index = index;
+    return index;
+  }
+
+  cancelIndex() {
+    this._indexToken++;
   }
 
   static async create(uri, size, vscode, encodingApi) {
@@ -90,6 +124,10 @@ class LargeCsvDocument {
   }
 
   async setEncodingKey(encodingKey) {
+    // Row boundaries are found in the file's own units, so a different encoding
+    // means a different index.
+    this.cancelIndex();
+    this._index = null;
     this.encodingKey = encodingKey;
     const sample = trimSampleAtLineBoundary(await readSample(this.uri.fsPath));
     this.delimiter = detectDelimiter(this._encodingApi.decode(sample, encodingKey), this.uri.path);
@@ -104,6 +142,7 @@ class LargeCsvDocument {
       this.delimiter,
       this._encodingApi
     );
+    this._pager.index = this._index;
     await this._pager.reset();
     return this._pager;
   }
@@ -121,6 +160,13 @@ class LargeCsvDocument {
   async pageAt(pageNumber) {
     if (!this._pager) await this.resetPager();
     return this._pager.pageAt(pageNumber);
+  }
+
+  /** The page holding a display row number, once the file has been indexed. */
+  async pageForRow(rowNumber) {
+    if (!this._index) return null;
+    const pageNumber = this._index.pageForRow(rowNumber);
+    return pageNumber === null ? null : this.pageAt(pageNumber);
   }
 
   get rowsSeen() {
@@ -158,6 +204,7 @@ class LargeCsvDocument {
   }
 
   dispose() {
+    this.cancelIndex();
     if (this._pager) void this._pager.close();
     this._onDidChangeContent.dispose();
   }
@@ -181,6 +228,8 @@ class CsvStreamPager {
     this.cachePath = null;
     this.cacheOffset = 0;
     this.cacheEntries = new Map();
+    /** Page offsets, once the file has been indexed. */
+    this.index = null;
   }
 
   async reset() {
@@ -245,18 +294,48 @@ class CsvStreamPager {
   }
 
   /**
-   * Any page that has been read, plus the next one. Pages already seen come
-   * from the cache, so a search that has passed a page can hand it back
-   * without streaming the file again.
+   * Any page: from the cache when it has been read, by continuing the stream
+   * when it is the next one, and otherwise by seeking straight to it once the
+   * file has been indexed.
    */
   async pageAt(pageNumber) {
     if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
-    if (pageNumber <= this.pageNumber) return this.readCachedPage(pageNumber);
+    const cached = await this.readCachedPage(pageNumber);
+    if (cached) return cached;
     if (pageNumber === this.pageNumber + 1) return this.nextPage(this.pageNumber);
-    return null;
+    return this.seekToPage(pageNumber);
+  }
+
+  /**
+   * Restart the stream at a page's recorded offset. Page boundaries are record
+   * boundaries, which is a safe place for the decoder to begin again.
+   */
+  async seekToPage(pageNumber) {
+    if (!this.index || !this.index.hasPage(pageNumber)) return null;
+    // Every page is shaped by the header, which lives before page 1.
+    if (this.header === null) {
+      const first = await this.nextPage(0);
+      if (pageNumber === 1) return first;
+      const cached = await this.readCachedPage(pageNumber);
+      if (cached) return cached;
+    }
+
+    if (this.stream) this.stream.destroy();
+    this.stream = fs.createReadStream(this.filePath, {
+      start: this.index.pageOffset(pageNumber),
+      highWaterMark: STREAM_CHUNK_BYTES,
+    });
+    this.iterator = this.stream[Symbol.asyncIterator]();
+    this.decoder = this.encodingApi.createDecoder(this.encodingKey);
+    this.parser = new StreamingCsvParser(this.delimiter);
+    this.done = false;
+    this.pageNumber = pageNumber - 1;
+    this.rowsSeen = (pageNumber - 1) * PAGE_ROWS;
+    return this.nextPage(this.pageNumber);
   }
 
   async cachePage(page) {
+    if (this.cacheEntries.has(page.pageNumber)) return;
     if (!this.cacheHandle) throw new Error("Large-file page cache is unavailable.");
     const encoded = Buffer.from(JSON.stringify(page), "utf8");
     const offset = this.cacheOffset;
@@ -472,6 +551,7 @@ async function searchLargeFile(document, request, hooks) {
     if (hooks.cancelled()) return;
     const page = await hooks.serialize(() => document.pageAt(pageNumber));
     if (!page) break;
+    if (hooks.onPage) hooks.onPage(page);
 
     for (const [index, row] of page.rows.entries()) {
       const rowNumber = page.startRow + index;
@@ -532,6 +612,32 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
   let searchToken = 0;
   const cancelSearch = () => { searchToken++; };
 
+  let indexToken = 0;
+  const startIndexing = () => {
+    const token = ++indexToken;
+    post({ type: "fileIndex", totalRows: 0, complete: false, indexedBytes: 0, size: document.size });
+    void document.buildIndex({
+      cancelled: () => token !== indexToken,
+      progress: (bytes) => {
+        if (token !== indexToken) return;
+        post({ type: "fileIndex", totalRows: 0, complete: false, indexedBytes: bytes, size: document.size });
+      },
+    }).then((index) => {
+      if (token !== indexToken || !index) return;
+      post({
+        type: "fileIndex",
+        totalRows: index.totalRows,
+        complete: true,
+        indexedBytes: document.size,
+        size: document.size,
+      });
+    }, () => {
+      // A file that cannot be indexed still previews; the scrollbar just stays
+      // bounded to the loaded window.
+      if (token === indexToken) post({ type: "fileIndex", totalRows: 0, complete: false, failed: true });
+    });
+  };
+
   const loadPage = async (mode, adjacentPage, focus) => {
     if (loading) return;
     loading = true;
@@ -548,10 +654,15 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
         page = await serialize(() => document.previousPage(adjacentPage));
       } else if (mode === "goto") {
         page = await serialize(() => document.pageAt(adjacentPage));
+      } else if (mode === "row") {
+        page = await serialize(() => document.pageForRow(adjacentPage));
       } else {
         page = await serialize(() => document.nextPage(adjacentPage));
       }
-      if (page) post({ type: "page", mode: mode === "goto" ? "replace" : mode, ...page, focus: focus || null });
+      if (page) {
+        const rendered = mode === "goto" || mode === "row" ? "replace" : mode;
+        post({ type: "page", mode: rendered, ...page, focus: focus || null });
+      }
     } catch (error) {
       post({ type: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -565,9 +676,19 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
     const token = searchToken;
     post({ type: "searchStarted", query: message.query });
     try {
+      let lastFollow = 0;
       await searchLargeFile(document, message, {
         serialize,
         cancelled: () => token !== searchToken,
+        onPage: (page) => {
+          if (token !== searchToken) return;
+          // Show the reader where the scan has reached, rate limited so a fast
+          // scan does not flood the Webview.
+          const now = Date.now();
+          if (now - lastFollow < SCAN_FOLLOW_INTERVAL_MS) return;
+          lastFollow = now;
+          post({ type: "page", mode: "replace", ...page, follow: true });
+        },
         report: (update) => {
           if (token !== searchToken) return;
           post({ type: "searchMatches", query: message.query, ...update });
@@ -585,6 +706,7 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
       case "ready":
         sendMetadata();
         await loadPage("replace");
+        startIndexing();
         break;
       case "nextPage":
         await loadPage("append", message.afterPage);
@@ -604,6 +726,9 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
       case "gotoMatch":
         await loadPage("goto", message.page, { row: message.row, column: message.column });
         break;
+      case "gotoRow":
+        await loadPage("row", message.row);
+        break;
       case "pickEncoding": {
         const items = encodingApi.SUPPORTED_ENCODINGS.map((encoding) => ({
           label: encoding.label,
@@ -617,6 +742,8 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
           await document.setEncodingKey(encodingApi.encodingKey(selected.encoding));
           sendMetadata();
           await loadPage("replace");
+          // Row boundaries depend on the encoding, so the index is read again.
+          startIndexing();
         }
         break;
       }
@@ -632,6 +759,8 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
   const fontSubscription = watchFontFamily(vscode, panel.webview);
   panel.onDidDispose(() => {
     cancelSearch();
+    indexToken++;
+    document.cancelIndex();
     messageSubscription.dispose();
     fontSubscription.dispose();
   });
@@ -753,16 +882,24 @@ function getLargeFileWebviewHtml() {
   thead { position: sticky; top: 0; z-index: 2; background: var(--vscode-editorWidget-background); }
   th.row-number { position: sticky; left: 0; z-index: 1; text-align: right; color: var(--vscode-descriptionForeground); background: var(--vscode-editorWidget-background); }
   thead th.column-header { cursor: pointer; user-select: none; }
-  tbody th.row-number { cursor: pointer; user-select: none; }
-  tbody tr:hover td { background: var(--vscode-list-hoverBackground); }
+  #rows th.row-number { cursor: pointer; user-select: none; }
+  #rows tr:hover td { background: var(--vscode-list-hoverBackground); }
   th.search-column,
   td.search-column { background: var(--vscode-list-inactiveSelectionBackground); }
-  tbody tr.highlighted-row > td,
-  tbody tr.highlighted-row > th { background: var(--vscode-list-inactiveSelectionBackground); }
+  #rows tr.highlighted-row > td,
+  #rows tr.highlighted-row > th { background: var(--vscode-list-inactiveSelectionBackground); }
   td.highlighted-cell { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
   td.match { background: var(--vscode-editor-findMatchBackground) !important; }
   td.match-current { background: var(--vscode-editor-findMatchHighlightBackground, var(--vscode-editor-findMatchBackground)) !important; outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
   #status { min-width: 130px; }
+  /* The rows that are not loaded. They carry the height of everything outside
+     the window, so the scrollbar measures the file rather than the window. */
+  #space-above td, #space-below td {
+    padding: 0; border: 0; height: 0; border-left: 1px solid var(--vscode-panel-border);
+    background-image: repeating-linear-gradient(135deg,
+      transparent 0 6px, var(--vscode-panel-border) 6px 7px);
+    opacity: .35;
+  }
 </style>
 </head>
 <body>
@@ -780,13 +917,25 @@ function getLargeFileWebviewHtml() {
     <button id="edit">Enable Editing</button>
   </div>
   <div id="error"></div>
-  <div id="table-wrap"><table><thead></thead><tbody></tbody></table></div>
+  <div id="table-wrap"><table><thead></thead><tbody id="space-above"><tr><td></td></tr></tbody><tbody id="rows"></tbody><tbody id="space-below"><tr><td></td></tr></tbody></table></div>
 <script nonce="${nonce}">
 (() => {
   const vscode = acquireVsCodeApi();
   const byId = id => document.getElementById(id);
   const maximumWindowRows = 500;
   const autoloadDistance = 400;
+  /** Rows kept between the edge of the window and the edge of the viewport
+   *  before the next page is fetched. */
+  const prefetchRows = 30;
+  /** Data rows in the file, once the host has indexed it. Zero means unknown,
+   *  and the preview falls back to describing only the loaded window. */
+  let totalRows = 0;
+  let indexedBytes = 0;
+  let indexSize = 0;
+  let indexComplete = false;
+  let rowHeight = 0;
+  /** While a scan runs the view follows it, until the reader takes over. */
+  let following = false;
   const filterDelayMs = 150;
   let loading = false;
   let pageRequested = false;
@@ -827,6 +976,56 @@ function getLargeFileWebviewHtml() {
     document.documentElement.style.setProperty('--csv-table-font-family', fontFamily);
   }
 
+  function absoluteScrolling() {
+    return totalRows > 0 && rowHeight > 0;
+  }
+
+  function measureRowHeight() {
+    const rows = byId('rows').rows;
+    if (!rows.length) return rowHeight;
+    const height = rows[0].getBoundingClientRect().height;
+    return height > 0 ? height : rowHeight;
+  }
+
+  function setSpacer(id, height, columns) {
+    const cell = byId(id).rows[0].cells[0];
+    cell.style.height = Math.max(0, height) + 'px';
+    if (columns) cell.colSpan = columns;
+  }
+
+  /** Give the unloaded parts of the file their height, so the scrollbar spans
+   *  the whole file and the thumb says how much is left. */
+  function updateSpacers() {
+    const rows = byId('rows').rows;
+    const columns = (document.querySelector('thead tr') || { cells: [] }).cells.length || 1;
+    if (!absoluteScrolling() || !rows.length) {
+      setSpacer('space-above', 0, columns);
+      setSpacer('space-below', 0, columns);
+      return;
+    }
+    const firstRow = Number(rows[0].dataset.rowNumber);
+    const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
+    // Data rows are numbered from 2, so the file holds rows 2 .. totalRows + 1.
+    setSpacer('space-above', (firstRow - 2) * rowHeight, columns);
+    setSpacer('space-below', (totalRows + 1 - lastRow) * rowHeight, columns);
+  }
+
+  /** The data row at the top of the viewport. */
+  function rowAtViewportTop() {
+    const head = document.querySelector('thead').getBoundingClientRect().height || 0;
+    const offset = Math.max(0, byId('table-wrap').scrollTop - head);
+    return Math.min(totalRows + 1, Math.floor(offset / rowHeight) + 2);
+  }
+
+  function scrollToRow(row) {
+    const head = document.querySelector('thead').getBoundingClientRect().height || 0;
+    byId('table-wrap').scrollTop = Math.max(0, (row - 2) * rowHeight) + head;
+  }
+
+  function stopFollowing() {
+    following = false;
+  }
+
   function captureScrollAnchor(body, tableWrap, head) {
     const rows = body.rows;
     if (!rows.length) return null;
@@ -845,11 +1044,15 @@ function getLargeFileWebviewHtml() {
 
   function render(page) {
     const head = document.querySelector('thead');
-    const body = document.querySelector('tbody');
+    const body = byId('rows');
     const tableWrap = byId('table-wrap');
     const replacing = page.mode === 'replace';
     const prepending = page.mode === 'prepend';
-    const anchor = replacing ? null : captureScrollAnchor(body, tableWrap, head);
+    // With the file's height on the spacers every row already sits at its own
+    // offset, so inserting and evicting rows cannot move anything.
+    const anchor = replacing || absoluteScrolling()
+      ? null
+      : captureScrollAnchor(body, tableWrap, head);
     const scrollLeft = tableWrap.scrollLeft;
     if (replacing || !head.firstChild) {
       head.replaceChildren();
@@ -912,8 +1115,14 @@ function getLargeFileWebviewHtml() {
       }
       for (const row of doomed) row.remove();
     }
-    if (replacing) tableWrap.scrollTop = 0;
-    else if (anchor && body.contains(anchor.row)) {
+    rowHeight = measureRowHeight();
+    updateSpacers();
+    if (replacing) {
+      if (page.follow && absoluteScrolling()) scrollToRow(page.startRow);
+      // A jump the reader made by dragging the scrollbar is already where they
+      // put it; only a genuinely new window starts at the top.
+      else if (!page.keepScroll && !page.focus) tableWrap.scrollTop = 0;
+    } else if (anchor && body.contains(anchor.row)) {
       // Measure the retained row after layout, including any browser scroll
       // clamping when a short final page makes the rolling window smaller.
       tableWrap.scrollTop += anchor.row.getBoundingClientRect().top - anchor.top;
@@ -932,7 +1141,7 @@ function getLargeFileWebviewHtml() {
       lastPageNumber = Number(lastVisibleRow.dataset.pageNumber);
       reachedEnd = lastVisibleRow.dataset.pageDone === 'true';
       byId('status').textContent = 'Rows ' + firstVisibleRow.dataset.rowNumber + '–' +
-        lastVisibleRow.dataset.rowNumber + (reachedEnd ? ' · End' : '');
+        lastVisibleRow.dataset.rowNumber + rowTotalLabel() + (reachedEnd ? ' · End' : '');
     } else {
       firstPageNumber = 0;
       lastPageNumber = 0;
@@ -962,6 +1171,16 @@ function getLargeFileWebviewHtml() {
       ? 'Scroll up or down to load nearby rows. Enable Editing is available for this file.'
       : 'Scroll up or down to load nearby rows. Full editing is unavailable above ' + fullEditingHardLimit + ' MiB.') +
       (notes.length ? ' ' + notes.join('. ') + '.' : '');
+  }
+
+  /** What the status line says about the size of the file. */
+  function rowTotalLabel() {
+    if (totalRows > 0) return ' of ' + totalRows.toLocaleString();
+    if (indexSize > 0 && !indexComplete) {
+      const percent = Math.min(99, Math.floor((indexedBytes / indexSize) * 100));
+      return ' · counting rows ' + percent + '%';
+    }
+    return '';
   }
 
   function hasSelectedSearchColumn() {
@@ -996,7 +1215,7 @@ function getLargeFileWebviewHtml() {
       const header = document.querySelector('thead tr').cells[selectedSearchColumn + 1];
       header.classList.add('search-column');
       selectedColumnCells.push(header);
-      const rows = document.querySelector('tbody').rows;
+      const rows = byId('rows').rows;
       for (let index = 0; index < rows.length; index++) {
         const cell = rows[index].cells[selectedSearchColumn + 1];
         if (cell) {
@@ -1017,7 +1236,7 @@ function getLargeFileWebviewHtml() {
 
   /** The cell for a file row and column, when that row is loaded. */
   function loadedCell(row, column) {
-    const tr = document.querySelector('tbody tr[data-row-number="' + row + '"]');
+    const tr = byId('rows').querySelector('tr[data-row-number="' + row + '"]');
     // cells[0] is the row-number header, so data column c sits at c + 1.
     return tr ? tr.cells[column + 1] || null : null;
   }
@@ -1054,7 +1273,7 @@ function getLargeFileWebviewHtml() {
     matches = [];
     if (!needle) { updateMatchCount(); return; }
     const scopedColumn = hasSelectedSearchColumn() ? selectedSearchColumn : -1;
-    const rows = document.querySelector('tbody').rows;
+    const rows = byId('rows').rows;
     for (const row of rows) {
       // cells[0] is the row-number header; reading the live list avoids one
       // selector query per row.
@@ -1089,12 +1308,16 @@ function getLargeFileWebviewHtml() {
     pendingMatchFocus = null;
     fileSearchQuery = query;
     if (!query) {
+      following = false;
       // Nothing was running, so there is nothing to call off.
       if (wasSearching) vscode.postMessage({ type: 'cancelSearch' });
       updateMatchCount();
       return;
     }
-    const rows = document.querySelector('tbody').rows;
+    const rows = byId('rows').rows;
+    // Follow the scan while it sweeps, so the reader can see how far it has
+    // reached; the first result, or any scrolling, hands control back.
+    following = fileSearchReveals;
     vscode.postMessage({
       type: 'searchFile',
       query: query,
@@ -1108,6 +1331,8 @@ function getLargeFileWebviewHtml() {
   function revealCurrentMatch(scrollToMatch) {
     const match = fileMatches[fileMatchIndex];
     if (!match) { updateMatchCount(); return; }
+    // There is a result to look at now, so stop chasing the scan.
+    if (scrollToMatch) stopFollowing();
     const cell = loadedCell(match.r, match.c);
     if (cell) {
       setCurrentMatchCell(cell);
@@ -1183,7 +1408,7 @@ function getLargeFileWebviewHtml() {
       highlightedColumnRule = sheet.cssRules[index];
     }
     const childIndex = cell.cellIndex + 1; // Includes the row-number header.
-    highlightedColumnRule.selectorText = '#table-wrap tbody tr > td:nth-child(' + childIndex + '), ' +
+    highlightedColumnRule.selectorText = '#table-wrap #rows tr > td:nth-child(' + childIndex + '), ' +
       '#table-wrap thead tr > th:nth-child(' + childIndex + ')';
   }
 
@@ -1201,6 +1426,13 @@ function getLargeFileWebviewHtml() {
     vscode.postMessage({ type: 'nextPage', afterPage: lastPageNumber });
   }
 
+  /** Load whichever page holds a row, however far away it is. */
+  function requestRow(row) {
+    if (loading || pageRequested) return;
+    pageRequested = true;
+    vscode.postMessage({ type: 'gotoRow', row: row });
+  }
+
   function requestPreviousPage() {
     if (loading || pageRequested || firstPageNumber <= 1) return;
     pageRequested = true;
@@ -1212,10 +1444,27 @@ function getLargeFileWebviewHtml() {
     // A scroll event caused by render's compensation is not another user scroll.
     if (tableWrap.scrollTop === lastScrollTop) return;
     const scrollingUp = tableWrap.scrollTop < lastScrollTop;
+    lastScrollTop = tableWrap.scrollTop;
+    // Scrolling is the reader taking over from a scan that was following along.
+    stopFollowing();
+
+    if (absoluteScrolling()) {
+      const rows = byId('rows').rows;
+      const wanted = rowAtViewportTop();
+      if (!rows.length) { requestRow(wanted); return; }
+      const firstRow = Number(rows[0].dataset.rowNumber);
+      const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
+      // Dragged clean out of the loaded window: fetch where they actually are.
+      if (wanted < firstRow || wanted > lastRow) { requestRow(wanted); return; }
+      const visible = Math.ceil(tableWrap.clientHeight / rowHeight);
+      if (wanted + visible + prefetchRows > lastRow) requestNextPage();
+      else if (wanted - prefetchRows < firstRow) requestPreviousPage();
+      return;
+    }
+
     const remaining = tableWrap.scrollHeight - tableWrap.scrollTop - tableWrap.clientHeight;
     if (scrollingUp && tableWrap.scrollTop <= autoloadDistance) requestPreviousPage();
     else if (!scrollingUp && remaining <= autoloadDistance) requestNextPage();
-    lastScrollTop = tableWrap.scrollTop;
   }
 
   function scheduleMaybeLoadMore() {
@@ -1247,6 +1496,8 @@ function getLargeFileWebviewHtml() {
     } else if (message.type === 'fontFamily') {
       applyFontFamily(message.fontFamily);
     } else if (message.type === 'page') {
+      // A page the scan is sweeping past is only shown while still following.
+      if (message.follow && !following) return;
       byId('error').style.display = 'none';
       render(message);
     } else if (message.type === 'loading') {
@@ -1254,6 +1505,19 @@ function getLargeFileWebviewHtml() {
       if (!loading) pageRequested = false;
       byId('edit').disabled = message.loading;
       if (message.loading) byId('status').textContent = 'Loading…';
+    } else if (message.type === 'fileIndex') {
+      indexedBytes = message.indexedBytes || 0;
+      indexSize = message.size || 0;
+      indexComplete = Boolean(message.complete);
+      if (message.complete) totalRows = message.totalRows || 0;
+      rowHeight = measureRowHeight();
+      updateSpacers();
+      const rows = byId('rows').rows;
+      if (rows.length) {
+        byId('status').textContent = 'Rows ' + rows[0].dataset.rowNumber + '–' +
+          rows[rows.length - 1].dataset.rowNumber + rowTotalLabel() +
+          (reachedEnd ? ' · End' : '');
+      }
     } else if (message.type === 'searchStarted') {
       // A scan for an older query may still be reporting; ignore it from here.
       if (message.query === fileSearchQuery) updateMatchCount();
@@ -1264,6 +1528,7 @@ function getLargeFileWebviewHtml() {
       fileScannedRows = message.scannedRows;
       fileSearchTruncated = message.truncated;
       fileSearchDone = message.done;
+      if (message.done) stopFollowing();
       if (hadNone && fileMatches.length) {
         // The first result the scan reaches from where the reader is.
         fileMatchIndex = 0;
@@ -1294,7 +1559,7 @@ function getLargeFileWebviewHtml() {
     const column = event.target.closest('th[data-column-index]');
     if (column) selectSearchColumn(Number(column.dataset.columnIndex));
   });
-  document.querySelector('tbody').addEventListener('click', event => {
+  byId('rows').addEventListener('click', event => {
     const number = event.target.closest('th.row-number');
     if (number) highlightRow(number.parentElement);
     else {

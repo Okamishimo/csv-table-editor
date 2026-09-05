@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The large-file preview now counts the file's rows in the background and shows
+  the rest of the file as placeholder space, so the scrollbar spans the whole
+  file instead of the few hundred loaded rows. The thumb finally says how much
+  is left, the status line reads `Rows 4,902–5,401 of 12,480,913`, and dragging
+  the scrollbar anywhere loads that part of the file directly rather than paging
+  towards it.
+- While a whole-file search runs, the preview follows the scan so you can see
+  how far it has reached. It hands control back as soon as you scroll, a match
+  is found, or the scan finishes.
+
 - The large-file preview now searches the whole file instead of only the rows
   it has loaded. The host streams the file and reports matches as it finds
   them, beginning at the row on screen and wrapping at the end of the file, so

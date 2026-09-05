@@ -180,3 +180,62 @@ test("a scan over a real file finds every match and leaves its pages cached", as
     assert.match(page.rows[match.r - page.startRow][match.c], /needle/);
   }
 });
+
+test("an indexed pager reaches any page directly, forwards or backwards", async (t) => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-table-editor-seek-"));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, "large.csv");
+  const lines = ["id,name"];
+  for (let index = 1; index <= 2000; index++) lines.push(`${index},"name, ${index}"`);
+  await fs.promises.writeFile(filePath, lines.join("\n"));
+
+  const { buildFileIndex } = require("../src/large-file-index");
+  const pager = new CsvStreamPager(filePath, "utf8", ",", encodingApi);
+  t.after(() => pager.close());
+  const first = await pager.nextPage();
+  assert.deepEqual(first.header, ["id", "name"]);
+
+  // Without an index a page beyond the next one is out of reach.
+  assert.equal(await pager.pageAt(15), null);
+
+  pager.index = await buildFileIndex(filePath, "utf8", 100);
+  assert.equal(pager.index.totalRows, 2000);
+
+  // Jump far ahead, then far back, then to the very end.
+  for (const [page, firstId] of [[15, 1401], [3, 201], [20, 1901], [1, 1], [11, 1001]]) {
+    const loaded = await pager.pageAt(page);
+    assert.ok(loaded, `page ${page} must be reachable`);
+    assert.equal(loaded.pageNumber, page);
+    assert.equal(loaded.startRow, (page - 1) * 100 + 2, `page ${page} row numbering`);
+    assert.equal(loaded.rows.length, 100);
+    assert.deepEqual(loaded.rows[0], [String(firstId), `name, ${firstId}`],
+      `page ${page} must begin at record ${firstId}`);
+    assert.deepEqual(loaded.header, ["id", "name"], "the header survives a seek");
+  }
+
+  // Scrolling on from a seeked position keeps working.
+  const after = await pager.pageAt(12);
+  assert.equal(after.rows[0][0], "1101");
+  assert.equal(await pager.pageAt(21), null, "there is no page past the end");
+});
+
+test("a seek does not cache the same page twice", async (t) => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-table-editor-seek2-"));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, "large.csv");
+  const lines = ["id,name"];
+  for (let index = 1; index <= 500; index++) lines.push(`${index},name ${index}`);
+  await fs.promises.writeFile(filePath, lines.join("\n"));
+
+  const { buildFileIndex } = require("../src/large-file-index");
+  const pager = new CsvStreamPager(filePath, "utf8", ",", encodingApi);
+  t.after(() => pager.close());
+  await pager.nextPage();
+  pager.index = await buildFileIndex(filePath, "utf8", 100);
+
+  await pager.pageAt(4);
+  const afterFirstSeek = pager.cacheOffset;
+  await pager.pageAt(4);
+  await pager.pageAt(1);
+  assert.equal(pager.cacheOffset, afterFirstSeek, "re-reading a cached page writes nothing new");
+});

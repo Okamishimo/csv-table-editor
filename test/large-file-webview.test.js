@@ -35,7 +35,7 @@ function scanMatches(document, query, { column = -1, fromRow = 0 } = {}) {
   const needle = query.toLowerCase();
   const ahead = [];
   const wrapped = [];
-  for (const row of document.querySelector("tbody").rows) {
+  for (const row of document.getElementById("rows").rows) {
     const rowNumber = Number(row.dataset.rowNumber);
     const page = Number(row.dataset.pageNumber);
     const first = column >= 0 ? column : 0;
@@ -71,13 +71,13 @@ function click(document, window, selector) {
 
 function cellColumnRule(document) {
   return Array.from(document.styleSheets[0].cssRules)
-    .find((rule) => rule.selectorText.includes("#table-wrap tbody tr > td:nth-child("));
+    .find((rule) => rule.selectorText.includes("#table-wrap #rows tr > td:nth-child("));
 }
 
 test("paging preserves visible row geometry through eviction, fractional heights and scroll clamping", (t) => {
   for (const mode of ["append", "prepend"]) {
     const { window, document, send, postedMessages } = openPreview(t);
-    const body = document.querySelector("tbody");
+    const body = document.getElementById("rows");
     const wrap = document.getElementById("table-wrap");
     const head = document.querySelector("thead");
     const height = (row) => 20 + Number(row.dataset.rowNumber) % 7 / 4;
@@ -187,7 +187,7 @@ test("preview cell clicks highlight both axes with bounded DOM changes and one s
     rows: [["Alice", "Taipei"], ["Bob", "Tokyo"]], pageNumber: 1, startRow: 2, endRow: 3,
     done: false, truncatedCells: 0, truncatedColumns: false };
   send(page);
-  const body = document.querySelector("tbody");
+  const body = document.getElementById("rows");
   const first = body.rows[0];
   const second = body.rows[1];
   const headers = document.querySelector("thead tr").cells;
@@ -264,7 +264,7 @@ test("preview cell axes extend to cached pages and clear when the active page is
         pageNumber, startRow: 2 + (pageNumber - 1) * 100, endRow: 1 + pageNumber * 100,
         done: false, truncatedCells: 0, truncatedColumns: false });
       if (index === 0) {
-        selectedRow = document.querySelector("tbody tr");
+        selectedRow = document.querySelector("#rows tr");
         click(selectedRow.cells[2]);
       } else if (index < 5) {
         assert.equal(selectedRow.classList.contains("highlighted-row"), true);
@@ -273,7 +273,7 @@ test("preview cell axes extend to cached pages and clear when the active page is
           "the new cached rows inherit the column highlight automatically");
       }
     }
-    assert.equal(document.querySelectorAll("tbody tr").length, 500);
+    assert.equal(document.querySelectorAll("#rows tr").length, 500);
     assert.equal(document.querySelectorAll("tr.highlighted-row, td.highlighted-cell").length, 0);
     assert.equal(selectedRow.isConnected, false);
     assert.equal(selectedRow.classList.contains("highlighted-row"), false);
@@ -301,7 +301,7 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     assert.equal(matches.length, scoped ? 2 : 3);
     const current = document.querySelector("td.match-current");
     const scrollBefore = scrolledCells.length;
-    const rows = document.querySelector("tbody").rows;
+    const rows = document.getElementById("rows").rows;
     const tableWrap = document.getElementById("table-wrap");
     tableWrap.scrollTop = 120;
     tableWrap.scrollLeft = 40;
@@ -357,19 +357,19 @@ test("large-file preview highlights whole rows without per-cell changes or clear
     done: false, truncatedCells: 0, truncatedColumns: false };
   send(page);
   const click = (element) => element.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  const firstRow = document.querySelector("tbody tr");
+  const firstRow = document.querySelector("#rows tr");
   const secondRow = firstRow.nextElementSibling;
   const column = document.querySelector('thead th[data-column-index="1"]');
   click(firstRow.cells[0]);
   assert.equal(firstRow.classList.contains("highlighted-row"), true);
-  assert.equal(document.querySelectorAll("tbody tr.highlighted-row").length, 1);
-  assert.equal(document.querySelectorAll("tbody td.highlighted-row").length, 0);
-  assert.match(document.querySelector("style").textContent, /tbody tr\.highlighted-row > td,\s*tbody tr\.highlighted-row > th/);
+  assert.equal(document.querySelectorAll("#rows tr.highlighted-row").length, 1);
+  assert.equal(document.querySelectorAll("#rows td.highlighted-row").length, 0);
+  assert.match(document.querySelector("style").textContent, /#rows tr\.highlighted-row > td,\s*#rows tr\.highlighted-row > th/);
   click(secondRow.cells[0]);
   assert.equal(firstRow.classList.contains("highlighted-row"), false);
   assert.equal(secondRow.classList.contains("highlighted-row"), true);
   click(secondRow.cells[0]);
-  assert.equal(document.querySelectorAll("tbody tr.highlighted-row").length, 1);
+  assert.equal(document.querySelectorAll("#rows tr.highlighted-row").length, 1);
   click(firstRow.cells[0]);
   click(column);
   assert.equal(firstRow.classList.contains("highlighted-row"), false);
@@ -380,7 +380,7 @@ test("large-file preview highlights whole rows without per-cell changes or clear
   send({ ...page, mode: "append", pageNumber: 2, startRow: 102, endRow: 103 });
   assert.equal(firstRow.classList.contains("highlighted-row"), true, "appending preserves the highlighted row");
   send(page);
-  assert.equal(document.querySelectorAll("tbody tr.highlighted-row").length, 0, "replacing the window clears the old row highlight");
+  assert.equal(document.querySelectorAll("#rows tr.highlighted-row").length, 0, "replacing the window clears the old row highlight");
   assert.equal(firstRow.classList.contains("highlighted-row"), false, "the detached row is no longer tracked or highlighted");
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages)), [{ type: "ready" }], "selection never requests another page");
   dom.window.close();
@@ -423,7 +423,7 @@ test("row highlighting preserves whole-window and column-scoped search results a
     const scope = document.getElementById("search-scope").textContent;
     const placeholder = filter.placeholder;
     const scrollBefore = scrollCount;
-    const rows = document.querySelector("tbody").rows;
+    const rows = document.getElementById("rows").rows;
     click(rows[0].cells[0]);
     click(rows[1].cells[0]);
     await new Promise((resolve) => window.setTimeout(resolve, 175));
@@ -495,7 +495,7 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   assert.equal(document.getElementById("text"), null);
   assert.equal(document.getElementById("readonly").textContent, "Read-only preview");
   assert.match(document.getElementById("readonly").title, /unavailable above 511 MiB/);
-  assert.equal(document.querySelectorAll("tbody tr").length, 2);
+  assert.equal(document.querySelectorAll("#rows tr").length, 2);
   assert.equal(document.getElementById("status").textContent, "Rows 2–3");
 
   send({ type: "fontFamily", fontFamily: "My Installed Font, monospace" });
@@ -514,7 +514,7 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
   answerSearch(postedMessages, send, scanMatches(document, "Alice", { fromRow: 2 }));
-  assert.equal(document.querySelectorAll("tbody td.match").length, 2);
+  assert.equal(document.querySelectorAll("#rows td.match").length, 2);
   assert.equal(document.getElementById("filter-count").textContent, "1/2 results");
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(document.getElementById("filter-count").textContent, "2/2 results");
@@ -525,18 +525,18 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
 
   const cityColumn = document.querySelector('thead th[data-column-index="1"]');
   cityColumn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  assert.equal(document.querySelectorAll("tbody td.match").length, 0);
+  assert.equal(document.querySelectorAll("#rows td.match").length, 0);
   assert.equal(document.getElementById("search-scope").textContent, "Column City only");
   assert.equal(filter.placeholder, "Find in column City");
   assert.equal(cityColumn.classList.contains("search-column"), true);
-  assert.equal(document.querySelectorAll("tbody td.search-column").length, 2);
+  assert.equal(document.querySelectorAll("#rows td.search-column").length, 2);
 
   cityColumn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  assert.equal(document.querySelectorAll("tbody td.match").length, 2);
+  assert.equal(document.querySelectorAll("#rows td.match").length, 2);
   assert.equal(document.getElementById("search-scope").textContent, "");
   assert.equal(filter.placeholder, "Find in file");
 
-  document.querySelector("tbody th.row-number")
+  document.querySelector("#rows th.row-number")
     .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(filter.placeholder, "Find in file", "row numbers never scope search");
   assert.equal(document.getElementById("search-scope").textContent, "");
@@ -553,7 +553,7 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
     truncatedCells: 0,
     truncatedColumns: false,
   });
-  assert.equal(document.querySelectorAll("tbody tr").length, 3, "automatic pages append to the rolling window");
+  assert.equal(document.querySelectorAll("#rows tr").length, 3, "automatic pages append to the rolling window");
   assert.match(document.getElementById("status").textContent, /End/);
   dom.window.close();
 });
@@ -585,7 +585,7 @@ test("large-file webview keeps a bounded rolling row window", () => {
     });
   }
 
-  const rows = document.querySelectorAll("tbody tr");
+  const rows = document.querySelectorAll("#rows tr");
   assert.equal(rows.length, 500);
   assert.equal(rows[0].dataset.rowNumber, "102");
   assert.equal(rows[rows.length - 1].dataset.rowNumber, "601");
@@ -704,7 +704,7 @@ test("large-file webview loads cached pages when scrolling upward", () => {
   });
   send({ type: "loading", loading: false });
 
-  const rows = document.querySelectorAll("tbody tr");
+  const rows = document.querySelectorAll("#rows tr");
   assert.equal(rows.length, 500);
   assert.equal(rows[0].dataset.rowNumber, "2");
   assert.equal(rows[rows.length - 1].dataset.rowNumber, "501");
@@ -735,7 +735,7 @@ test("large-file preview attaches cell tooltips only on hover", () => {
     truncatedColumns: false,
   });
 
-  const cells = document.querySelectorAll("tbody td");
+  const cells = document.querySelectorAll("#rows td");
   assert.equal(
     Array.from(cells).filter((cell) => cell.hasAttribute("title")).length,
     0,
@@ -780,12 +780,12 @@ test("large-file preview evicts a whole page without re-reading the live row lis
   });
 
   page(1, "replace");
-  const firstRow = document.querySelector("tbody tr");
+  const firstRow = document.querySelector("#rows tr");
   firstRow.cells[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(firstRow.classList.contains("highlighted-row"), true);
   for (let pageNumber = 2; pageNumber <= 6; pageNumber++) page(pageNumber, "append");
 
-  const rows = document.querySelectorAll("tbody tr");
+  const rows = document.querySelectorAll("#rows tr");
   assert.equal(rows.length, 500, "the window stays bounded at five pages");
   const pageNumbers = new Set(Array.from(rows, (row) => row.dataset.pageNumber));
   assert.deepEqual(
@@ -794,7 +794,7 @@ test("large-file preview evicts a whole page without re-reading the live row lis
     "the oldest page is evicted whole, newest pages kept"
   );
   assert.equal(firstRow.classList.contains("highlighted-row"), false, "eviction clears the detached highlighted row");
-  assert.equal(document.querySelectorAll("tbody tr.highlighted-row").length, 0);
+  assert.equal(document.querySelectorAll("#rows tr.highlighted-row").length, 0);
 
   dom.window.close();
 });
@@ -937,4 +937,197 @@ test("navigation wraps from the last match back to the first", async (t) => {
 
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
   assert.equal(count.textContent, "3/3 results", "and backwards from the first to the last");
+});
+
+const ROW_HEIGHT = 20;
+const HEAD_HEIGHT = 26;
+const VIEWPORT = 400;
+
+/**
+ * Open the preview with a measurable viewport. JSDOM has no layout, so the
+ * scroller and row heights are modelled; without them the preview falls back to
+ * describing only the loaded window.
+ */
+function openMeasuredPreview(t) {
+  const harness = openPreview(t);
+  const { window, document } = harness;
+  const wrap = document.getElementById("table-wrap");
+  let scrollTop = 0;
+  Object.defineProperties(wrap, {
+    clientHeight: { get: () => VIEWPORT, configurable: true },
+    scrollTop: {
+      get: () => scrollTop,
+      set(value) { scrollTop = Math.max(0, value); },
+      configurable: true,
+    },
+  });
+  window.HTMLTableRowElement.prototype.getBoundingClientRect = function rect() {
+    const height = this.parentElement && this.parentElement.id === "rows" ? ROW_HEIGHT : 0;
+    return { top: 0, bottom: height, height };
+  };
+  document.querySelector("thead").getBoundingClientRect = () => (
+    { top: 0, bottom: HEAD_HEIGHT, height: HEAD_HEIGHT }
+  );
+
+  const page = (pageNumber, mode, extra = {}) => harness.send({
+    type: "page", mode, header: ["Name", "City"],
+    rows: Array.from({ length: 100 }, (_, index) => {
+      const row = 2 + (pageNumber - 1) * 100 + index;
+      return [`name ${row}`, `city ${row}`];
+    }),
+    pageNumber, startRow: 2 + (pageNumber - 1) * 100, endRow: 101 + (pageNumber - 1) * 100,
+    done: false, truncatedCells: 0, truncatedColumns: false, ...extra,
+  });
+  const index = (totalRows) => harness.send({
+    type: "fileIndex", totalRows, complete: true, indexedBytes: 1000, size: 1000,
+  });
+  const spacer = (id) => Number.parseFloat(
+    document.getElementById(id).rows[0].cells[0].style.height
+  ) || 0;
+  const scrollTo = (offset) => {
+    wrap.scrollTop = offset;
+    wrap.dispatchEvent(new window.Event("scroll"));
+  };
+  const offsetOfRow = (row) => (row - 2) * ROW_HEIGHT + HEAD_HEIGHT;
+  return { ...harness, wrap, page, index, spacer, scrollTo, offsetOfRow };
+}
+
+test("once the file is counted, placeholders carry the rows that are not loaded", (t) => {
+  const { document, page, index, spacer } = openMeasuredPreview(t);
+  page(1, "replace");
+  assert.equal(spacer("space-above"), 0, "no total yet, so nothing to stand in for");
+  assert.equal(spacer("space-below"), 0);
+
+  index(10000);
+  assert.equal(spacer("space-above"), 0, "the window starts at the first row");
+  // Rows 102..10001 are not loaded; the placeholder carries their height.
+  assert.equal(spacer("space-below"), (10001 - 101) * ROW_HEIGHT);
+  assert.match(document.getElementById("status").textContent, /Rows 2–101 of 10,000/);
+});
+
+test("evicted rows become placeholder height, so nothing moves and the scrollbar holds", (t) => {
+  const { document, page, index, spacer, wrap } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+  for (let pageNumber = 2; pageNumber <= 6; pageNumber++) page(pageNumber, "append");
+
+  const rows = document.getElementById("rows").rows;
+  assert.equal(rows.length, 500, "the rolling window is still bounded");
+  assert.equal(rows[0].dataset.rowNumber, "102", "the first page was evicted");
+
+  // The evicted page is now height above the window rather than rows in it.
+  assert.equal(spacer("space-above"), 100 * ROW_HEIGHT);
+  assert.equal(spacer("space-below"), (10001 - 601) * ROW_HEIGHT);
+  const content = spacer("space-above") + spacer("space-below") + rows.length * ROW_HEIGHT;
+  assert.equal(content, 10000 * ROW_HEIGHT, "the scroller always spans the whole file");
+  assert.equal(wrap.scrollTop, 0, "growing the placeholder above must not shift the view");
+});
+
+test("dragging the scrollbar far away loads that part of the file and stays there", (t) => {
+  const { document, page, index, scrollTo, offsetOfRow, postedMessages, spacer } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+
+  scrollTo(offsetOfRow(5000));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoRow", row: 5000 }, "the reader is asking for row 5000, not the next page");
+
+  // The host answers with the page holding that row and asks to stay put.
+  page(50, "replace", { keepScroll: true });
+  const rows = document.getElementById("rows").rows;
+  assert.equal(rows[0].dataset.rowNumber, "4902");
+  assert.equal(document.getElementById("table-wrap").scrollTop, offsetOfRow(5000),
+    "a jump the reader made must not be thrown back to the top");
+  assert.equal(spacer("space-above"), (4902 - 2) * ROW_HEIGHT);
+  assert.match(document.getElementById("status").textContent, /of 10,000/);
+});
+
+test("scrolling inside the loaded window fetches neighbours rather than jumping", (t) => {
+  const { send, page, index, scrollTo, offsetOfRow, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+  for (const pageNumber of [2, 3]) page(pageNumber, "append");
+  const clearPending = () => send({ type: "loading", loading: false });
+
+  // Well inside the window: 51 rows of loaded data still lie below the viewport.
+  scrollTo(offsetOfRow(250));
+  assert.equal(postedMessages.at(-1).type, "ready", "a scroll with room to spare fetches nothing");
+
+  // Close enough to the bottom of the window that the next page is wanted.
+  scrollTo(offsetOfRow(255));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "nextPage", afterPage: 3 }, "the neighbour is paged in, not jumped to");
+
+  clearPending();
+  scrollTo(offsetOfRow(4));
+  assert.equal(postedMessages.at(-1).type, "nextPage",
+    "page 1 is already loaded, so there is nothing above to fetch");
+});
+
+test("scrolling up from a window that starts mid-file pages backwards", (t) => {
+  const { send, page, index, scrollTo, offsetOfRow, postedMessages } = openMeasuredPreview(t);
+  page(20, "replace");
+  index(10000);
+  send({ type: "loading", loading: false });
+
+  scrollTo(offsetOfRow(1905));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "previousPage", beforePage: 20 });
+});
+
+test("while a scan sweeps the file the view follows it, until the reader takes over", async (t) => {
+  const { window, document, send, page, index, scrollTo, offsetOfRow, postedMessages, wrap } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+
+  const filter = document.getElementById("filter");
+  filter.value = "nothing-matches";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  assert.equal(postedMessages.at(-1).type, "searchFile");
+
+  // The host shows the pages the scan is passing.
+  page(30, "replace", { follow: true });
+  assert.equal(document.getElementById("rows").rows[0].dataset.rowNumber, "2902");
+  assert.equal(wrap.scrollTop, offsetOfRow(2902), "the view moves to where the scan has reached");
+
+  page(60, "replace", { follow: true });
+  assert.equal(wrap.scrollTop, offsetOfRow(5902));
+
+  // The reader scrolling is them taking over.
+  scrollTo(offsetOfRow(5910));
+  const held = wrap.scrollTop;
+  page(90, "replace", { follow: true });
+  assert.equal(wrap.scrollTop, held, "a followed page is ignored once the reader has taken over");
+  assert.equal(document.getElementById("rows").rows[0].dataset.rowNumber, "5902",
+    "and the window they were looking at stays");
+});
+
+test("finding a match stops the view chasing the scan", async (t) => {
+  const { window, document, send, page, index, postedMessages, wrap, offsetOfRow } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+  const filter = document.getElementById("filter");
+  filter.value = "name 50";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+
+  answerSearch(postedMessages, send, [{ r: 50, c: 0, p: 1 }], { done: false, scannedRows: 900 });
+  const settled = wrap.scrollTop;
+  page(70, "replace", { follow: true });
+  assert.equal(wrap.scrollTop, settled, "a result is more interesting than the sweep");
+  assert.equal(document.getElementById("rows").rows[0].dataset.rowNumber, "2",
+    "the reader keeps looking at the match, not the scan");
+});
+
+test("counting progress is shown until the total is known", (t) => {
+  const { document, send, page } = openMeasuredPreview(t);
+  page(1, "replace");
+  send({ type: "fileIndex", totalRows: 0, complete: false, indexedBytes: 250, size: 1000 });
+  assert.match(document.getElementById("status").textContent, /counting rows 25%/);
+  send({ type: "fileIndex", totalRows: 4321, complete: true, indexedBytes: 1000, size: 1000 });
+  assert.match(document.getElementById("status").textContent, /Rows 2–101 of 4,321/);
 });

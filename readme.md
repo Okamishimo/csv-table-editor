@@ -88,6 +88,12 @@ adjacent 100 rows, so you can move forward and backward without keeping the
 complete file in memory. The visible table stays bounded to 500 rows and lets
 you change the detected encoding.
 
+The scrollbar spans the whole file: the row count is worked out in the
+background, and everything outside the loaded window is shown as placeholder
+space, so the thumb tells you how far from the end you are. Dragging it anywhere
+loads that part of the file directly, and the status line reads
+`Rows 4,902–5,401 of 12,480,913`.
+
 Search covers the **whole file**, not just the rows on screen. Matches start
 appearing while the file is still being read, beginning at the row you are
 looking at and wrapping around the end. Enter and Shift+Enter step between them

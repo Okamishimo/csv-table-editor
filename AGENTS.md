@@ -36,6 +36,8 @@ into the original runtime by `scripts/patch-distribution.js`.
   protection.
 - `src/large-file-mode.js`: Streaming parser, disk-backed page cache, large-file
   document/provider behavior, and the read-only preview Webview.
+- `src/large-file-index.js`: One pass over a large file for its exact row count
+  and the byte offset of every page.
 - `src/font-settings.js`: Free-form `csvTableEditor.fontFamily` support and live
   setting updates.
 - `src/search-scope.js`: Decorates the editable Webview with column-scoped
@@ -164,6 +166,23 @@ Large-file protections are correctness requirements, not optional tuning.
   yields without equivalent protection.
 - Preserve bidirectional scrolling through cached pages. Page cache files must
   be unique per document and removed when the document closes.
+- The preview counts the file's rows once, in the background, and records where
+  every page begins. The count must agree exactly with `StreamingCsvParser`, so
+  the index reads the file's own units and mirrors its quote and terminator
+  rules; a differential test against that parser guards the agreement. A
+  different encoding means a different index.
+- With the count known, the rows outside the window are represented by two
+  placeholder rows carrying their height, never by real elements: a
+  multi-gigabyte file has tens of millions of rows. The scroller therefore spans
+  the whole file, evicting a page turns its rows into placeholder height rather
+  than moving anything, and no scroll compensation is needed. Without the count
+  the preview falls back to describing only the loaded window.
+- Page offsets make any page directly reachable, so dragging the scrollbar loads
+  where the reader actually is instead of paging there. A jump the reader made
+  keeps its scroll position.
+- A running scan may show the pages it passes, so the reader can see how far it
+  has reached. Following ends the moment the reader scrolls, a result is
+  revealed, or the scan finishes; it must never fight them for the viewport.
 - Preview search covers the whole file, not the loaded window. The host streams
   the file and reports matches as it finds them, starting at the reader's first
   loaded row and wrapping at the end, so every row is examined exactly once.
