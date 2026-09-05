@@ -1,0 +1,103 @@
+{
+	"name": "csv-table-editor",
+	"displayName": "CSV Table Editor — Encoding & History",
+	"description": "Open, view and edit CSV/TSV files as a spreadsheet grid: sort, filter, search, pick the encoding (UTF-8, UTF-16, Shift_JIS, Windows-1252/1258...), keep a save history and compare versions as a side-by-side table diff.",
+	"version": "0.0.9",
+	"publisher": "Edgar-Dang",
+	"license": "MIT",
+	"icon": "media/icon.png",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/minlong8111/csv-table-editor.git"
+	},
+	"bugs": {
+		"url": "https://github.com/minlong8111/csv-table-editor/issues"
+	},
+	"homepage": "https://github.com/minlong8111/csv-table-editor#readme",
+	"categories": [
+		"Data Science",
+		"Formatters",
+		"Visualization",
+		"Other"
+	],
+	"keywords": [
+		"csv",
+		"csv editor",
+		"csv encoding",
+		"csv diff",
+		"shift_jis",
+		"tsv",
+		"csv viewer",
+		"csv table",
+		"windows-1258",
+		"utf-16"
+	],
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"main": "./dist/extension.js",
+	"activationEvents": [],
+	"contributes": {
+		"configuration": {
+			"title": "CSV Table Editor",
+			"properties": {
+				"csvTableEditor.fontFamily": {
+					"type": "string",
+					"default": "",
+					"scope": "window",
+					"description": "CSS font-family value used by the CSV grid and large-file preview. For example: 'Microsoft JhengHei', 'Noto Sans TC', sans-serif. Leave empty to use the VS Code interface font."
+				},
+				"csvTableEditor.maxFileSizeMB": {
+					"type": "number",
+					"default": 64,
+					"minimum": 1,
+					"maximum": 511,
+					"scope": "window",
+					"description": "Maximum CSV/TSV size in MiB loaded directly into the editable in-memory grid. Larger local files open in a paged, streaming, read-only preview. Raising this value can use substantial memory."
+				}
+			}
+		},
+		"customEditors": [
+			{
+				"viewType": "csvTableEditor.editor",
+				"displayName": "CSV Table Editor",
+				"selector": [
+					{
+						"filenamePattern": "*.csv"
+					},
+					{
+						"filenamePattern": "*.tsv"
+					}
+				],
+				"priority": "default"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run patch:dist && npm test",
+		"compile": "webpack",
+		"watch": "webpack --watch",
+		"package": "npm run patch:dist && npm test",
+		"lint": "eslint src --ext ts",
+		"patch:dist": "node scripts/patch-distribution.js",
+		"test": "node --test test/*.test.js"
+	},
+	"dependencies": {
+		"iconv-lite": "^0.6.3"
+	},
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"@types/vscode": "^1.85.0",
+		"@vscode/vsce": "^3.9.2",
+		"jsdom": "^30.0.1",
+		"ts-loader": "^9.5.1",
+		"typescript": "^5.3.3",
+		"webpack": "^5.90.0",
+		"webpack-cli": "^5.1.4"
+	},
+	"__metadata": {
+		"installedTimestamp": 1788502981135,
+		"targetPlatform": "undefined",
+		"size": 914016
+	}
+}

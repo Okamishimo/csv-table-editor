@@ -1,0 +1,137 @@
+# Change Log
+
+All notable changes to the **CSV Table Editor — Encoding & History** extension
+are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.9] - 2026-09-05
+
+### Added
+
+- Search can be limited to one column by clicking its column header. Clicking
+  that header again restores whole-table search. The editable grid and the
+  loaded large-file preview both show the active scope and matching cells.
+
+### Fixed
+
+- Searching, sorting and clicking cells in the editable grid no longer scan
+  the whole table for every match. Cells are reached through a row index
+  rebuilt once per render, so a search that took over a minute on a few
+  thousand rows now completes in milliseconds.
+- Selecting a row or column paints a few stylesheet rules instead of adding a
+  class to every cell in it, making cell selection cost the same on a large
+  file as on a small one.
+- Clicking a cell no longer re-runs the search; only an actual change of column
+  scope does.
+- Filter typing in the editable grid is debounced, so a long query runs one
+  scan instead of one per keystroke.
+- The grid's CSV parser copies runs of text between quotes, delimiters and
+  line breaks rather than one character at a time, roughly quadrupling parse
+  throughput.
+- The large-file preview tracks its own highlighted cells instead of querying
+  the loaded window, so stepping through matches and loading a page while a
+  search is active no longer walk every visible cell.
+- Evicting an off-window page from the preview collects the rows before
+  detaching them, instead of re-reading the live row list after each removal.
+- Preview cells get their tooltip on first hover rather than at render time,
+  cutting about a third off the cost of loading a page.
+
+### Changed
+
+- Replaced the fixed font list with the free-form
+  `csvTableEditor.fontFamily` setting. Any installed font or CSS fallback list
+  can be entered, and open CSV editors update when the setting changes.
+- Large-file previews now load cached pages in both scroll directions while
+  keeping the in-memory DOM window bounded.
+- Replaced the full-width read-only notice and the three paging/text buttons
+  with a compact `Read-only preview` label in the toolbar.
+
+## [0.0.8] - 2026-09-04
+
+### Fixed
+
+- Prevented filtered or short previews from chaining automatic page requests
+  without another user scroll event.
+- Reduced Webview and extension-host stalls with smaller stream batches,
+  bounded row/cell previews, batched DOM insertion, debounced filtering and
+  cooperative stream parsing.
+
+### Added
+
+- A persistent table-font selector for both the editable grid and the
+  streaming large-file preview.
+
+## [0.0.7] - 2026-09-04
+
+### Changed
+
+- The large-file preview now automatically streams the next 500 rows when the
+  table is scrolled near the bottom. The **Load more** button remains as a
+  manual fallback.
+- The preview keeps a rolling window of at most 2,000 rows in the webview,
+  removing the oldest rows as new ones arrive to keep memory use bounded.
+- **First page** restarts the stream when earlier rows need to be viewed again.
+
+## [0.0.6] - 2026-09-04
+
+### Added
+
+- A streaming, paged, read-only preview for local CSV/TSV files above the
+  configured in-memory editing threshold.
+- The preview reads 500 rows at a time, replaces the previous page, supports
+  per-page filtering, encoding changes and returning to the first page.
+- Files up to 511 MiB can explicitly opt into the original full-grid editing
+  mode after a memory-use warning. Larger files remain safely read-only.
+- Preview cells are capped at 20,000 characters and preview rows at 200
+  columns to keep malformed data from exhausting the extension host.
+
+### Changed
+
+- `csvTableEditor.maxFileSizeMB` now selects when streaming preview starts,
+  rather than rejecting larger local files.
+
+## [0.0.5] - 2026-09-04
+
+### Fixed
+
+- Prevented oversized CSV/TSV files from reaching V8's single-string limit and
+  crashing with `Cannot create a string longer than 0x1fffffe8 characters`.
+- Oversized files now show their actual size and offer to reopen in VS Code's
+  text editor.
+- Added the `csvTableEditor.maxFileSizeMB` safety setting (64 MiB by default,
+  capped at 511 MiB).
+
+## [0.0.4] - 2026-09-04
+
+### Added
+
+- Automatic encoding detection for BOM-less UTF-16, Shift_JIS, EUC-JP, GBK,
+  Big5, EUC-KR, Windows-1258, Windows-1252 and Latin-1 CSV/TSV files.
+- Strict UTF-8 validation before falling back to a legacy encoding.
+- Separate UTF-16 choices with and without a BOM, preserving the detected BOM
+  behavior when the file is saved.
+
+## [0.0.1] - Unreleased
+
+### Added
+
+- Open `.csv` and `.tsv` files in an editable grid (custom editor).
+- Inline cell editing, add/remove rows and columns.
+- Encoding support via `iconv-lite`: UTF-8, UTF-8 with BOM, UTF-16 LE/BE,
+  Shift_JIS, EUC-JP, Windows-1252, Latin-1, GBK, Big5, EUC-KR, Windows-1258.
+  Encoding is auto-detected from the BOM on open.
+- Clickable encoding label in the toolbar to reopen with a different encoding
+  or save with a chosen encoding.
+- Ctrl/Cmd+F search across all cells, with match highlighting and navigation.
+- Header-row detection with a metadata preamble kept above the table.
+- Three-state column sort (ascending → descending → original) that is
+  view-only and never reorders the underlying data on save.
+- Excel-style row/column highlighting for the selected cell.
+- Persistent per-file save history (last 50 versions) stored in the
+  extension's global storage.
+- Table diff view that compares a history version with the current content
+  side by side, highlighting added, removed and changed rows.
