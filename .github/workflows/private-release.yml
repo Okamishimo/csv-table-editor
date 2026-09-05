@@ -38,12 +38,11 @@ jobs:
       - name: Install dependencies
         if: steps.prepare.outputs.skip != 'true'
         run: npm ci
+      # Packaging runs vscode:prepublish, which builds but does not test, so the
+      # suite runs exactly once per release.
       - name: Build the customized distribution and run tests
         if: steps.prepare.outputs.skip != 'true'
-        run: |
-          npm run build
-          npm test
-          node scripts/verify-patch-idempotency.js
+        run: npm run verify
       - name: Package VSIX
         if: steps.prepare.outputs.skip != 'true'
         env:

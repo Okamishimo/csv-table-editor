@@ -108,14 +108,15 @@
 		]
 	},
 	"scripts": {
-		"vscode:prepublish": "npm run build && npm test",
+		"vscode:prepublish": "npm run build",
 		"compile": "webpack",
 		"watch": "webpack --watch",
-		"package": "npm run patch:dist && npm test",
+		"package": "npm run verify",
 		"lint": "eslint src --ext ts",
 		"patch:dist": "node scripts/patch-distribution.js",
 		"test": "node --test test/*.test.js",
-		"build": "npm run patch:dist && node scripts/check-syntax.js"
+		"build": "npm run patch:dist && node scripts/check-syntax.js",
+		"verify": "npm run build && npm test && node scripts/verify-patch-idempotency.js"
 	},
 	"dependencies": {
 		"iconv-lite": "^0.6.3"

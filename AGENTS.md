@@ -332,16 +332,15 @@ node --test test/private-release.test.js
 Before handing off a behavior change, run:
 
 ```powershell
-npm run patch:dist
-npm test
-node --check dist/extension.js
-npm run patch:dist
-node scripts/check-syntax.js
-node scripts/verify-patch-idempotency.js
+npm run verify
 ```
 
-The second patch run must recognize the already-patched bundle, and the
-idempotency script additionally asserts byte-for-byte equality. The syntax
+That is `npm run build` (the distribution patch and the syntax checks), then the
+tests, then `scripts/verify-patch-idempotency.js`. It is the single definition of
+"everything passes": the release workflow runs exactly this, and nothing else in
+the pipeline repeats it. The idempotency script reapplies the patch and asserts
+the bundle is byte-for-byte unchanged, which also proves the second patch run
+recognizes the already-patched form. The syntax
 script runs `node --check` on the project's JavaScript files. The forward-slash
 paths above work on macOS, Linux, and PowerShell.
 
@@ -373,9 +372,9 @@ Keep descriptions aligned with the row/column terminology above.
 
 Do not create a VSIX unless the user explicitly asks for packaging.
 
-`npm run package` currently applies the distribution patch and runs tests; it
-does not itself create a VSIX. To create the installable artifact, use the local
-VSCE binary after tests pass:
+`npm run package` is an alias for `npm run verify`; it does not itself create a
+VSIX. To create the installable artifact, run `npm run verify` and then the local
+VSCE binary:
 
 ```powershell
 .\node_modules\.bin\vsce.cmd package --no-dependencies --out csv-table-editor-<version>-enhanced.vsix
@@ -384,8 +383,10 @@ VSCE binary after tests pass:
 On macOS/Linux, use `./node_modules/.bin/vsce`. If copied dependencies leave that
 wrapper without execute permission, invoke the installed CLI directly with
 `node node_modules/@vscode/vsce/vsce` rather than changing the build process.
-Packaging invokes `vscode:prepublish` (`npm run build && npm test`), so expect
-syntax checks, the distribution patch, and the full tests to run again.
+Packaging invokes `vscode:prepublish`, which is `npm run build` alone: it
+guarantees the bundle is patched and syntactically valid, which is what packaging
+needs, without running the tests a second time. Run `npm run verify` yourself
+before packaging.
 
 Every package containing new changes must use a newly incremented semantic
 version, normally the next patch version. Never overwrite or reuse an existing

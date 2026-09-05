@@ -182,8 +182,8 @@ Client read tokens belong only in each computer's VS Code SecretStorage.
 
 The workflow runs when a `v*` tag is pushed or a Release is published. It checks
 out that tag, verifies it matches `package.json`, installs dependencies with
-`npm ci`, runs `npm run build` and the tests, checks patch idempotency, and runs
-`vsce package --no-dependencies`. This repository's build applies the validated
+`npm ci`, runs `npm run verify` (the build, the tests and the patch idempotency
+check), and runs `vsce package --no-dependencies`. This repository's build applies the validated
 distribution patches and checks JavaScript syntax; it does not run the obsolete
 webpack compile task because the original TypeScript/webpack project is absent.
 
