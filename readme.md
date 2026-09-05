@@ -189,7 +189,11 @@ The updater follows GitHub's **latest stable release**; when publishing an older
 maintenance version, keep the desired newest version marked Latest in GitHub.
 
 Existing assets are never overwritten. Duplicate tag/release events skip a
-release that already has both assets. A partially uploaded release fails safely:
+release that already has both assets. If both assets uploaded but the final
+publication failed, a retry using the corrected release script publishes the
+existing draft and skips packaging. Drafts are resolved by their pending tag
+through GraphQL because the REST tag endpoint only returns published releases.
+A partially uploaded release fails safely:
 retain the existing asset, use a new patch version/tag for a fresh build, and
 leave the incomplete release as a draft. Do not move or reuse a published tag.
 Every release keeps one canonical `csv-table-editor-<version>-enhanced.vsix`.

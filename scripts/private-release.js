@@ -17,17 +17,27 @@ function gh(args) {
   return execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
-function existingRelease(tag) {
-  // --include lets us distinguish an absent release from permission/network errors.
-  let output;
-  try { output = gh(["api", "--include", `repos/${REPOSITORY}/releases/tags/${tag}`]); }
-  catch (error) {
-    if (/^HTTP\/\S+ 404\b/m.test(String(error.stdout))) return null;
+function existingRelease(tag, runGh = gh) {
+  // REST /releases/tags only finds published releases. Resolve the ID through
+  // GraphQL first so pending tags on drafts are found too (as gh release does).
+  const [owner, name] = REPOSITORY.split("/");
+  const query = "query($owner:String!,$name:String!,$tag:String!){repository(owner:$owner,name:$name){release(tagName:$tag){databaseId}}}";
+  try {
+    const response = JSON.parse(runGh(["api", "graphql", "-f", `query=${query}`,
+      "-f", `owner=${owner}`, "-f", `name=${name}`, "-f", `tag=${tag}`]));
+    const repository = response.data?.repository;
+    if (response.errors?.length || !repository) throw new Error("Repository lookup failed.");
+    if (repository.release === null) return null;
+    const id = repository.release?.databaseId;
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Invalid release ID.");
+    const release = JSON.parse(runGh(["api", `repos/${REPOSITORY}/releases/${id}`]));
+    if (release.tag_name !== tag || typeof release.draft !== "boolean" || !Array.isArray(release.assets)) {
+      throw new Error("Invalid release response.");
+    }
+    return release;
+  } catch {
     throw new Error("Cannot read the GitHub Release. Check Actions contents permission and connectivity.");
   }
-  const start = output.indexOf("{");
-  if (start < 0) throw new Error("Invalid GitHub Release response.");
-  return JSON.parse(output.slice(start));
 }
 
 function ensureAssetsAvailable(release, name) {
@@ -36,18 +46,18 @@ function ensureAssetsAvailable(release, name) {
   }
 }
 
-async function main() {
+async function main(command = process.argv[2], runGh = gh) {
   const manifest = require("../package.json");
   const info = releaseInfo(manifest, process.env.RELEASE_TAG);
   if (process.env.GITHUB_REPOSITORY && process.env.GITHUB_REPOSITORY !== REPOSITORY) throw new Error("Unexpected release repository.");
-  if (process.argv[2] === "prepare") {
-    const release = existingRelease(info.tag);
+  if (command === "prepare") {
+    const release = existingRelease(info.tag, runGh);
     const assets = release?.assets || [];
     const complete = [info.name, `${info.name}.sha256`].every((name) =>
       assets.some((asset) => asset.name === name && asset.state === "uploaded" && asset.size > 0));
     if (complete) {
       // Tag + release events can both fire. Reuse an already published release.
-      if (release.draft) gh(["release", "edit", info.tag, "--repo", REPOSITORY, "--draft=false"]);
+      if (release.draft) runGh(["release", "edit", info.tag, "--repo", REPOSITORY, "--draft=false"]);
       console.log("This tag already has both assets; skipping duplicate packaging.");
       fs.appendFileSync(process.env.GITHUB_OUTPUT, "skip=true\n");
       return;
@@ -55,7 +65,7 @@ async function main() {
     ensureAssetsAvailable(release, info.name);
     if (fs.existsSync(info.name)) throw new Error("The target VSIX already exists. Increment the version instead of replacing it.");
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip=false\nvsix=${info.name}\n`);
-  } else if (process.argv[2] === "verify") {
+  } else if (command === "verify") {
     await verifyVsixManifest(info.name, manifest, info.version);
     const { open } = require("yauzl"); // Development dependency provided by vsce.
     const entries = await new Promise((resolve, reject) => open(info.name, { lazyEntries: true }, (error, zip) => {
@@ -76,16 +86,17 @@ async function main() {
     const digest = hash.digest("hex");
     fs.writeFileSync(`${info.name}.sha256`, `${digest}  ${info.name}\n`, { flag: "wx" });
     console.log(`${info.name}: ${fs.statSync(info.name).size} bytes; SHA-256 ${digest}`);
-  } else if (process.argv[2] === "publish") {
-    let release = existingRelease(info.tag);
+  } else if (command === "publish") {
+    let release = existingRelease(info.tag, runGh);
     ensureAssetsAvailable(release, info.name);
     if (!release) {
-      gh(["release", "create", info.tag, "--repo", REPOSITORY, "--verify-tag", "--draft", "--title", info.tag, "--generate-notes"]);
-      release = existingRelease(info.tag);
+      runGh(["release", "create", info.tag, "--repo", REPOSITORY, "--verify-tag", "--draft", "--title", info.tag, "--generate-notes"]);
+      release = existingRelease(info.tag, runGh);
+      if (!release) throw new Error("The created draft release is not visible yet. Retry the workflow after GitHub finishes creating it.");
     }
     // No --clobber: published assets are never replaced, including partial uploads.
-    gh(["release", "upload", info.tag, info.name, `${info.name}.sha256`, "--repo", REPOSITORY]);
-    if (release.draft) gh(["release", "edit", info.tag, "--repo", REPOSITORY, "--draft=false"]);
+    runGh(["release", "upload", info.tag, info.name, `${info.name}.sha256`, "--repo", REPOSITORY]);
+    if (release.draft) runGh(["release", "edit", info.tag, "--repo", REPOSITORY, "--draft=false"]);
     console.log(`Uploaded verified assets to ${REPOSITORY} release ${info.tag}.`);
   } else throw new Error("Expected prepare, verify, or publish.");
 }
@@ -96,4 +107,4 @@ if (require.main === module) main().catch((error) => {
   process.exitCode = 1;
 });
 
-module.exports = { releaseInfo, ensureAssetsAvailable };
+module.exports = { releaseInfo, ensureAssetsAvailable, existingRelease, main };

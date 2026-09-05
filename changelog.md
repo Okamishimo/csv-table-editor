@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Release automation now finds draft releases by their pending tag before
+  uploading or publishing, preventing the null `draft` error on a first release.
+  Retrying after both assets uploaded publishes the existing draft and skips
+  packaging without replacing either asset.
+
 ### Added
 
 - Private GitHub Release updates on installed macOS and Windows extensions,
