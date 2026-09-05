@@ -607,7 +607,7 @@ function getLargeFileWebviewHtml() {
   .muted { color: var(--vscode-descriptionForeground); font-size: .9em; }
   #readonly { color: var(--vscode-descriptionForeground); white-space: nowrap; }
   #error { display: none; color: var(--vscode-errorForeground); padding: 8px 10px; }
-  #table-wrap { overflow: auto; flex: 1 1 auto; min-height: 0; }
+  #table-wrap { overflow: auto; overflow-anchor: none; flex: 1 1 auto; min-height: 0; }
   table { border-collapse: collapse; min-width: 100%; white-space: nowrap; }
   th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 7px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
   thead { position: sticky; top: 0; z-index: 2; background: var(--vscode-editorWidget-background); }
@@ -674,12 +674,30 @@ function getLargeFileWebviewHtml() {
     document.documentElement.style.setProperty('--csv-table-font-family', fontFamily);
   }
 
+  function captureScrollAnchor(body, tableWrap, head) {
+    const rows = body.rows;
+    if (!rows.length) return null;
+    const visibleTop = tableWrap.getBoundingClientRect().top + head.getBoundingClientRect().height;
+    // Find the first row below the sticky header without scanning the table.
+    let low = 0;
+    let high = rows.length - 1;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (rows[middle].getBoundingClientRect().bottom <= visibleTop) low = middle + 1;
+      else high = middle;
+    }
+    const row = rows[low];
+    return { row, top: row.getBoundingClientRect().top };
+  }
+
   function render(page) {
     const head = document.querySelector('thead');
     const body = document.querySelector('tbody');
     const tableWrap = byId('table-wrap');
     const replacing = page.mode === 'replace';
     const prepending = page.mode === 'prepend';
+    const anchor = replacing ? null : captureScrollAnchor(body, tableWrap, head);
+    const scrollLeft = tableWrap.scrollLeft;
     if (replacing || !head.firstChild) {
       head.replaceChildren();
       const headerRow = document.createElement('tr');
@@ -722,9 +740,6 @@ function getLargeFileWebviewHtml() {
     if (prepending) body.insertBefore(fragment, body.firstChild);
     else body.appendChild(fragment);
 
-    const rowHeight = body.rows.length ? body.rows[0].getBoundingClientRect().height : 0;
-    let removedHeight = 0;
-    const addedHeight = prepending ? rowHeight * page.rows.length : 0;
     // body.rows is live, so collect the doomed rows before detaching any of
     // them; re-reading the collection after every removal is quadratic.
     if (body.rows.length > maximumWindowRows && prepending) {
@@ -743,16 +758,19 @@ function getLargeFileWebviewHtml() {
         doomed.push(body.rows[index]);
       }
       for (const row of doomed) row.remove();
-      removedHeight = rowHeight * doomed.length;
     }
-    if (prepending && addedHeight > 0) tableWrap.scrollTop += addedHeight;
-    else if (!replacing && removedHeight > 0) tableWrap.scrollTop = Math.max(0, tableWrap.scrollTop - removedHeight);
-    else if (replacing) tableWrap.scrollTop = 0;
+    if (replacing) tableWrap.scrollTop = 0;
+    else if (anchor && body.contains(anchor.row)) {
+      // Measure the retained row after layout, including any browser scroll
+      // clamping when a short final page makes the rolling window smaller.
+      tableWrap.scrollTop += anchor.row.getBoundingClientRect().top - anchor.top;
+    }
+    tableWrap.scrollLeft = scrollLeft;
 
     if (highlightedRowElement && !body.contains(highlightedRowElement)) clearRowHighlight();
     syncSelectedSearchColumn();
     // A page arriving while nothing is searched has no highlights to redo.
-    if (matches.length || byId('filter').value.trim()) runSearch(true);
+    if (matches.length || byId('filter').value.trim()) runSearch(true, false);
     const visibleRows = body.rows;
     if (visibleRows.length) {
       const firstVisibleRow = visibleRows[0];
@@ -954,6 +972,8 @@ function getLargeFileWebviewHtml() {
 
   function maybeLoadAdjacentPage() {
     const tableWrap = byId('table-wrap');
+    // A scroll event caused by render's compensation is not another user scroll.
+    if (tableWrap.scrollTop === lastScrollTop) return;
     const scrollingUp = tableWrap.scrollTop < lastScrollTop;
     const remaining = tableWrap.scrollHeight - tableWrap.scrollTop - tableWrap.clientHeight;
     if (scrollingUp && tableWrap.scrollTop <= autoloadDistance) requestPreviousPage();

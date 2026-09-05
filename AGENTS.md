@@ -154,6 +154,10 @@ Large-file protections are correctness requirements, not optional tuning.
   yields without equivalent protection.
 - Preserve bidirectional scrolling through cached pages. Page cache files must
   be unique per document and removed when the document closes.
+- Preserve a visible row's measured screen position across page insertion and
+  eviction; do not estimate offsets from one row's height. Keep browser scroll
+  anchoring disabled on the preview scroller and ignore compensation scroll
+  events. Refresh search highlights during paging without scrolling to a match.
 - Automatic loading must be triggered by real user scrolling. Rendering,
   searching, or filtering must not start an uncontrolled page-request chain.
 - Avoid whole-table DOM scans on selection and match navigation. Preserve the

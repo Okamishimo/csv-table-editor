@@ -32,6 +32,108 @@ function cellColumnRule(document) {
     .find((rule) => rule.selectorText.includes("#table-wrap tbody tr > td:nth-child("));
 }
 
+test("paging preserves visible row geometry through eviction, fractional heights and scroll clamping", (t) => {
+  for (const mode of ["append", "prepend"]) {
+    const { window, document, send, postedMessages } = openPreview(t);
+    const body = document.querySelector("tbody");
+    const wrap = document.getElementById("table-wrap");
+    const head = document.querySelector("thead");
+    const height = (row) => 20 + Number(row.dataset.rowNumber) % 7 / 4;
+    const contentHeight = () => 26 + Array.from(body.rows).reduce((sum, row) => sum + height(row), 0);
+    let scrollTop = 0;
+    let measuredRows = 0;
+    Object.defineProperties(wrap, {
+      clientHeight: { get: () => 260 },
+      scrollHeight: { get: contentHeight },
+      // JSDOM has no layout. Model the browser's clamp when eviction shrinks
+      // the document, so compensation cannot assume the old scrollTop survives.
+      scrollTop: {
+        get() { scrollTop = Math.max(0, Math.min(scrollTop, contentHeight() - 260)); return scrollTop; },
+        set(value) { scrollTop = Math.max(0, Math.min(value, contentHeight() - 260)); },
+      },
+    });
+    wrap.getBoundingClientRect = () => ({ top: 0, bottom: 260, height: 260 });
+    head.getBoundingClientRect = () => ({ top: 0, bottom: 26, height: 26 });
+    window.HTMLTableRowElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      measuredRows++;
+      let top = 26 - wrap.scrollTop;
+      for (const row of body.rows) {
+        if (row === this) break;
+        top += height(row);
+      }
+      return { top, bottom: top + height(this), height: height(this) };
+    };
+    const page = (pageNumber, pageMode, length = 100) => send({
+      type: "page", mode: pageMode, header: ["Row"],
+      rows: Array.from({ length }, (_, index) => [String(2 + (pageNumber - 1) * 100 + index)]),
+      pageNumber, startRow: 2 + (pageNumber - 1) * 100,
+      endRow: 1 + (pageNumber - 1) * 100 + length,
+      done: length < 100, truncatedCells: 0, truncatedColumns: false,
+    });
+    for (let number = 6; number <= 10; number++) {
+      page(number, number === 6 ? "replace" : "append", mode === "prepend" && number === 10 ? 50 : 100);
+    }
+    wrap.scrollLeft = 40;
+    if (mode === "append") wrap.scrollTop = wrap.scrollHeight - wrap.clientHeight - 20;
+    else {
+      wrap.scrollTop = 220;
+      wrap.dispatchEvent(new window.Event("scroll"));
+      wrap.scrollTop = 180;
+    }
+    wrap.dispatchEvent(new window.Event("scroll"));
+    assert.equal(postedMessages.at(-1).type, mode === "append" ? "nextPage" : "previousPage");
+    const visibleRow = Array.from(body.rows).find((row) => row.getBoundingClientRect().bottom > 26);
+    const topBefore = visibleRow.getBoundingClientRect().top;
+    const rowNumber = visibleRow.dataset.rowNumber;
+    const requestCount = postedMessages.length;
+    measuredRows = 0;
+    send({ type: "loading", loading: true });
+    if (mode === "append") page(11, "append", 50);
+    else page(5, "prepend");
+    send({ type: "loading", loading: false });
+    assert.ok(measuredRows <= 12, "finding and restoring the visible anchor must not scan all 500 row rectangles");
+    assert.equal(visibleRow.isConnected, true);
+    assert.ok(Math.abs(visibleRow.getBoundingClientRect().top - topBefore) < 0.001,
+      `visible row ${rowNumber} must keep its pixel offset after ${mode}`);
+    assert.equal(wrap.scrollLeft, 40);
+    assert.equal(body.rows.length, mode === "append" ? 450 : 500);
+    assert.match(document.querySelector("style").textContent, /#table-wrap \{[^}]*overflow-anchor: none/);
+    // Browsers emit this event asynchronously after our scrollTop adjustment.
+    wrap.dispatchEvent(new window.Event("scroll"));
+    assert.equal(postedMessages.length, requestCount, "compensation must not trigger another page request");
+    if (mode === "prepend") {
+      wrap.scrollTop = 0;
+      wrap.dispatchEvent(new window.Event("scroll"));
+      assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))), { type: "previousPage", beforePage: 5 });
+    }
+  }
+});
+
+test("loading pages refreshes search matches without scrolling back to the current match", async (t) => {
+  const { window, document, send, scrolledCells } = openPreview(t);
+  const page = { type: "page", mode: "replace", header: ["Name"],
+    rows: [["Alice"], ["Alice"]], pageNumber: 2, startRow: 102, endRow: 103,
+    done: false, truncatedCells: 0, truncatedColumns: false };
+  send(page);
+  const filter = document.getElementById("filter");
+  filter.value = "Alice";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const scrollCount = scrolledCells.length;
+  for (const mode of ["append", "prepend"]) {
+    send({ ...page, mode, rows: [["Alice"]], pageNumber: mode === "append" ? 3 : 1,
+      startRow: mode === "append" ? 202 : 2, endRow: mode === "append" ? 202 : 2 });
+    assert.equal(scrolledCells.length, scrollCount, "loading must not call scrollIntoView for a search match");
+  }
+  assert.equal(document.querySelectorAll("td.match").length, 4);
+  assert.equal(document.querySelectorAll("td.match-current").length, 1);
+  assert.equal(document.getElementById("filter-count").textContent, "2/4 results");
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(scrolledCells.length, scrollCount + 1, "explicit match navigation still scrolls");
+  assert.equal(document.getElementById("filter-count").textContent, "3/4 results");
+});
+
 test("preview cell clicks highlight both axes with bounded DOM changes and one stylesheet rule", (t) => {
   const { window, document, send, click, postedMessages } = openPreview(t);
   const page = { type: "page", mode: "replace", header: ["Name", "City"],
@@ -343,6 +445,7 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   assert.equal(postedMessages.length, 1, "font changes come from VS Code settings, not the webview");
   assert.match(document.documentElement.style.getPropertyValue("--csv-table-font-family"), /My Installed Font/);
 
+  document.getElementById("table-wrap").scrollTop = 1;
   document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
   assert.equal(
     JSON.stringify(postedMessages.at(-1)),
@@ -464,6 +567,7 @@ test("large-file webview does not cascade page requests without another user scr
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
 
+  document.getElementById("table-wrap").scrollTop = 1;
   document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
   await new Promise((resolve) => window.setTimeout(resolve, 25));
   send({ type: "loading", loading: true });
@@ -480,6 +584,7 @@ test("large-file webview does not cascade page requests without another user scr
     truncatedColumns: false,
   });
   send({ type: "loading", loading: false });
+  document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
   await new Promise((resolve) => window.setTimeout(resolve, 25));
 
   assert.equal(postedMessages.filter((message) => message.type === "nextPage").length, 1);

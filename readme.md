@@ -84,6 +84,8 @@ adjacent 100 rows, so you can move forward and backward without keeping the
 complete file in memory. The visible table stays bounded to 500 rows, supports
 searching the loaded window (including column-only search) and lets you change the
 detected encoding.
+Loading adjacent pages keeps the visible record at the same screen position,
+including when older rows leave the window or a search is active.
 
 For files no larger than 511 MiB, **Enable Editing** can explicitly reopen the
 full in-memory grid after a warning. Files above that JavaScript hard limit,

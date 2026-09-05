@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Read-only paging preserves the visible row's actual screen position when
+  inserting or removing cached pages, including short final pages. Loading no
+  longer scrolls back to a search match or requests another page by itself.
+
 ## [0.0.12] - 2026-09-05
 
 ### Fixed
