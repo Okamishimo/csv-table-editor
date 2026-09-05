@@ -161,6 +161,8 @@ test("loading pages refreshes search matches without scrolling back to the curre
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   // The host reports every match in the file, including rows not loaded yet.
   answerSearch(postedMessages, send, [
     { r: 102, c: 0, p: 2 }, { r: 103, c: 0, p: 2 },
@@ -241,7 +243,7 @@ test("preview cell clicks highlight both axes with bounded DOM changes and one s
   assert.equal(document.getElementById("search-scope").textContent, "Column City only");
   click(first.cells[1]);
   assert.equal(document.querySelectorAll(".search-column").length, 0, "cell clicks cancel the previous whole-column highlight");
-  assert.equal(document.getElementById("filter").placeholder, "Find in file");
+  assert.equal(document.getElementById("filter").placeholder, "Find in file — press Enter");
   assert.deepEqual(Array.from(document.querySelectorAll(cellColumnRule(document).selectorText)),
     [headers[1], first.cells[1], second.cells[1]], "only the clicked cell's column remains highlighted");
   send({ ...page, mode: "append", pageNumber: 2, startRow: 102, endRow: 103 });
@@ -294,6 +296,8 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     filter.value = "Alice";
     filter.dispatchEvent(new window.Event("input"));
     await new Promise((resolve) => window.setTimeout(resolve, 175));
+    // Typing only paints; Enter is what reads the file.
+    filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     answerSearch(postedMessages, send,
       scanMatches(document, "Alice", { column: scoped ? 0 : -1, fromRow: 2 }));
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -315,7 +319,7 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     click(rows[1].cells[2]);
     await new Promise((resolve) => window.setTimeout(resolve, 175));
     assert.equal(document.getElementById("search-scope").textContent, "");
-    assert.equal(filter.placeholder, "Find in file");
+    assert.equal(filter.placeholder, "Find in file — press Enter");
     assert.equal(filter.value, "Alice");
     assert.equal(filter.disabled, false);
     assert.deepEqual(Array.from(document.querySelectorAll("td.match")),
@@ -411,6 +415,8 @@ test("row highlighting preserves whole-window and column-scoped search results a
     filter.value = "Alice";
     filter.dispatchEvent(new window.Event("input"));
     await new Promise((resolve) => window.setTimeout(resolve, 175));
+    // Typing only paints; Enter is what reads the file.
+    filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     answerSearch(postedMessages, (data) =>
       window.dispatchEvent(new window.MessageEvent("message", { data })),
       scanMatches(document, "Alice", { column: columnIndex === null ? -1 : columnIndex, fromRow: 2 }));
@@ -513,6 +519,8 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   answerSearch(postedMessages, send, scanMatches(document, "Alice", { fromRow: 2 }));
   assert.equal(document.querySelectorAll("#rows td.match").length, 2);
   assert.equal(document.getElementById("filter-count").textContent, "1/2 results");
@@ -527,18 +535,18 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   cityColumn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(document.querySelectorAll("#rows td.match").length, 0);
   assert.equal(document.getElementById("search-scope").textContent, "Column City only");
-  assert.equal(filter.placeholder, "Find in column City");
+  assert.equal(filter.placeholder, "Find in column City — press Enter");
   assert.equal(cityColumn.classList.contains("search-column"), true);
   assert.equal(document.querySelectorAll("#rows td.search-column").length, 2);
 
   cityColumn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(document.querySelectorAll("#rows td.match").length, 2);
   assert.equal(document.getElementById("search-scope").textContent, "");
-  assert.equal(filter.placeholder, "Find in file");
+  assert.equal(filter.placeholder, "Find in file — press Enter");
 
   document.querySelector("#rows th.row-number")
     .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  assert.equal(filter.placeholder, "Find in file", "row numbers never scope search");
+  assert.equal(filter.placeholder, "Find in file — press Enter", "row numbers never scope search");
   assert.equal(document.getElementById("search-scope").textContent, "");
 
   send({
@@ -624,6 +632,8 @@ test("large-file webview does not cascade page requests without another user scr
   filter.value = "no matches";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
   document.getElementById("table-wrap").scrollTop = 1;
   document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
@@ -799,7 +809,7 @@ test("large-file preview evicts a whole page without re-reading the live row lis
   dom.window.close();
 });
 
-test("typing asks the host to read the whole file from where the reader is", async (t) => {
+test("typing highlights what is on screen; Enter is what reads the file", async (t) => {
   const { window, document, send, postedMessages } = openPreview(t);
   send({ type: "page", mode: "replace", header: ["Name", "City"],
     rows: [["Alice", "Taipei"], ["Bob", "Tokyo"]], pageNumber: 4, startRow: 302, endRow: 303,
@@ -808,9 +818,14 @@ test("typing asks the host to read the whole file from where the reader is", asy
   const filter = document.getElementById("filter");
   filter.value = "  Alice  ";
   filter.dispatchEvent(new window.Event("input"));
-  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 0, "typing is debounced");
   await new Promise((resolve) => window.setTimeout(resolve, 175));
 
+  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 0,
+    "a half-typed word must not send the reader off to a match for it");
+  assert.equal(document.querySelectorAll("#rows td.match").length, 1,
+    "but the rows already on screen are highlighted straight away");
+
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "searchFile", query: "Alice", column: -1, fromRow: 302 },
     "the scan starts at the first loaded row so results continue from here");
@@ -818,6 +833,39 @@ test("typing asks the host to read the whole file from where the reader is", asy
   // Scoping to a column restarts the scan for that column only.
   click(document, window, 'thead th[data-column-index="1"]');
   assert.equal(postedMessages.at(-1).column, 1);
+});
+
+test("Enter walks the results once the file has been read", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["Alice"], ["Alice"]],
+    pageNumber: 1, startRow: 2, endRow: 3, done: true, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  filter.value = "Alice";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+
+  const press = (shift) => filter.dispatchEvent(
+    new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: shift, bubbles: true }));
+  const count = document.getElementById("filter-count");
+
+  press(false);
+  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }]);
+  assert.equal(count.textContent, "1/2 results", "the first Enter runs the search");
+
+  press(false);
+  assert.equal(count.textContent, "2/2 results", "the next walks the results");
+  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 1,
+    "walking the results does not read the file again");
+
+  // Editing the query makes the next Enter a new search.
+  filter.value = "Alicia";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  assert.match(count.textContent, /Enter to search the file/,
+    "results for the old query are not shown for the new one");
+  press(false);
+  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 2);
+  assert.equal(postedMessages.at(-1).query, "Alicia");
 });
 
 test("clearing the query calls off a running scan exactly once", async (t) => {
@@ -828,6 +876,8 @@ test("clearing the query calls off a running scan exactly once", async (t) => {
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }]);
 
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -849,6 +899,8 @@ test("progress is shown while the file is still being read", async (t) => {
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const count = document.getElementById("filter-count");
 
   send({ type: "searchStarted", query: "Alice" });
@@ -875,6 +927,8 @@ test("results from a superseded query are ignored", async (t) => {
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
   send({ type: "searchMatches", query: "Bob", matches: [{ r: 2, c: 0, p: 1 }],
     done: true, truncated: false, scannedRows: 10 });
@@ -891,6 +945,8 @@ test("a match outside the loaded window loads its page and is revealed there", a
   filter.value = "needle";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
   // The only match is far away, on a page the reader has never seen.
   answerSearch(postedMessages, send, [{ r: 5002, c: 0, p: 51 }]);
@@ -919,6 +975,8 @@ test("navigation wraps from the last match back to the first", async (t) => {
   filter.value = "needle";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   // Two matches here, one far below: the scan reports them in reading order.
   answerSearch(postedMessages, send,
     [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }, { r: 900, c: 0, p: 10 }]);
@@ -961,13 +1019,27 @@ function openMeasuredPreview(t) {
       configurable: true,
     },
   });
+  // Model where rows actually land, not just how tall they are: the preview
+  // measures the first row to check its own arithmetic against the layout.
+  let renderedRowHeight = ROW_HEIGHT;
+  const spacerHeight = (id) =>
+    Number.parseFloat(document.getElementById(id).rows[0].cells[0].style.height) || 0;
   window.HTMLTableRowElement.prototype.getBoundingClientRect = function rect() {
-    const height = this.parentElement && this.parentElement.id === "rows" ? ROW_HEIGHT : 0;
-    return { top: 0, bottom: height, height };
+    if (!this.parentElement || this.parentElement.id !== "rows") {
+      return { top: 0, bottom: 0, height: 0 };
+    }
+    const siblings = document.getElementById("rows").rows;
+    const index = Array.prototype.indexOf.call(siblings, this);
+    const top = spacerHeight("space-above") + HEAD_HEIGHT
+      + index * renderedRowHeight - wrap.scrollTop;
+    return { top, bottom: top + renderedRowHeight, height: renderedRowHeight };
   };
+  wrap.getBoundingClientRect = () => ({ top: 0, bottom: VIEWPORT, height: VIEWPORT });
   document.querySelector("thead").getBoundingClientRect = () => (
     { top: 0, bottom: HEAD_HEIGHT, height: HEAD_HEIGHT }
   );
+  /** Make the browser lay rows out at a height the preview did not expect. */
+  const setRenderedRowHeight = (height) => { renderedRowHeight = height; };
 
   const page = (pageNumber, mode, extra = {}) => harness.send({
     type: "page", mode, header: ["Name", "City"],
@@ -989,7 +1061,7 @@ function openMeasuredPreview(t) {
     wrap.dispatchEvent(new window.Event("scroll"));
   };
   const offsetOfRow = (row) => (row - 2) * ROW_HEIGHT + HEAD_HEIGHT;
-  return { ...harness, wrap, page, index, spacer, scrollTo, offsetOfRow };
+  return { ...harness, wrap, page, index, spacer, scrollTo, offsetOfRow, setRenderedRowHeight };
 }
 
 test("once the file is counted, placeholders carry the rows that are not loaded", (t) => {
@@ -1120,6 +1192,8 @@ test("while a scan sweeps the file the view follows it, until the reader takes o
   filter.value = "nothing-matches";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(postedMessages.at(-1).type, "searchFile");
 
   // The host shows the pages the scan is passing.
@@ -1148,6 +1222,8 @@ test("finding a match stops the view chasing the scan", async (t) => {
   filter.value = "name 50";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Typing only paints; Enter is what reads the file.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
   answerSearch(postedMessages, send, [{ r: 50, c: 0, p: 1 }], { done: false, scannedRows: 900 });
   const settled = wrap.scrollTop;
@@ -1164,4 +1240,77 @@ test("counting progress is shown until the total is known", (t) => {
   assert.match(document.getElementById("status").textContent, /counting rows 25%/);
   send({ type: "fileIndex", totalRows: 4321, complete: true, indexedBytes: 1000, size: 1000 });
   assert.match(document.getElementById("status").textContent, /Rows 2–101 of 4,321/);
+});
+
+test("a layout that disagrees with the arithmetic is corrected, not argued with", (t) => {
+  const { document, page, index, spacer, setRenderedRowHeight } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(100000);
+  assert.equal(spacer("space-above"), 0);
+
+  // The browser lays rows out a little taller than the preview measured, which
+  // is what fractional row heights do over a long file.
+  setRenderedRowHeight(ROW_HEIGHT + 0.4);
+  page(500, "replace", { keepScroll: true });
+
+  const rows = document.getElementById("rows").rows;
+  const firstRow = Number(rows[0].dataset.rowNumber);
+  const wrap = document.getElementById("table-wrap");
+  const measured = rows[0].getBoundingClientRect().top - wrap.getBoundingClientRect().top
+    + wrap.scrollTop;
+  assert.ok(Math.abs(measured - (HEAD_HEIGHT + (firstRow - 2) * ROW_HEIGHT)) < 0.5,
+    `the first row must sit where the row arithmetic says: ${measured}`);
+});
+
+test("a window that does not cover the reader is accepted rather than asked for again", (t) => {
+  const { document, send, page, index, scrollTo, offsetOfRow, postedMessages } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+
+  scrollTo(offsetOfRow(5000));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoRow", row: 5000 });
+
+  // A host that answers with the wrong window must not start a request loop:
+  // asking again would only produce the same answer.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    page(2, "replace", { keepScroll: true });
+    send({ type: "loading", loading: false });
+  }
+  assert.equal(postedMessages.filter((message) => message.type === "gotoRow").length, 1,
+    "the reader is not chased round a loop of identical requests");
+  assert.doesNotMatch(document.getElementById("status").textContent, /Loading/);
+
+  // Moving again is a fresh intent, so the preview does ask once more.
+  scrollTo(offsetOfRow(5001));
+  assert.equal(postedMessages.filter((message) => message.type === "gotoRow").length, 2);
+});
+
+
+test("the counter says what is on screen until the file has actually been read", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["Alice"], ["Alice"], ["Bob"]],
+    pageNumber: 1, startRow: 2, endRow: 4, done: false, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  const count = document.getElementById("filter-count");
+
+  filter.value = "Ali";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  assert.equal(count.textContent, "2 on screen · Enter to search the file",
+    "a half-typed query reports only what it can see");
+
+  filter.value = "zzz";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  assert.equal(count.textContent, "Enter to search the file");
+
+  filter.value = "Alice";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(count.textContent, "Searching… 0 rows", "now it is genuinely reading the file");
+  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }]);
+  assert.equal(count.textContent, "1/2 results");
 });

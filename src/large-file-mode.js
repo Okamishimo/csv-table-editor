@@ -925,7 +925,7 @@ function getLargeFileWebviewHtml() {
     <span class="muted" id="file-size"></span>
     <button id="encoding" title="Choose another encoding"></button>
     <span class="muted" id="delimiter"></span>
-    <input id="filter" type="search" placeholder="Find in file">
+    <input id="filter" type="search" placeholder="Find in file — press Enter">
     <span class="muted" id="filter-count"></span>
     <span class="muted" id="search-scope"></span>
     <span class="spacer"></span>
@@ -981,6 +981,9 @@ function getLargeFileWebviewHtml() {
   let fileSearchTruncated = false;
   let fileScannedRows = 0;
   let pendingMatchFocus = null;
+  /** The row the last jump asked for, so an answer that does not cover it is
+   *  accepted rather than requested again and again. */
+  let lastRequestedRow = -1;
   /** Whether the reader asked for this search, and may therefore be taken to
    *  its first result. A scan restarted by cancelling a column scope must not
    *  move them away from the cell they just clicked. */
@@ -1001,7 +1004,9 @@ function getLargeFileWebviewHtml() {
     const rows = byId('rows').rows;
     if (!rows.length) return rowHeight;
     const height = rows[0].getBoundingClientRect().height;
-    return height > 0 ? height : rowHeight;
+    // Whole pixels: the spacers multiply this by millions of rows, and a
+    // fraction repeated that often drifts the arithmetic away from the layout.
+    return height > 0 ? Math.round(height) : rowHeight;
   }
 
   function setSpacer(id, height, columns) {
@@ -1023,8 +1028,31 @@ function getLargeFileWebviewHtml() {
     const firstRow = Number(rows[0].dataset.rowNumber);
     const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
     // Data rows are numbered from 2, so the file holds rows 2 .. totalRows + 1.
-    setSpacer('space-above', (firstRow - 2) * rowHeight, columns);
+    const above = (firstRow - 2) * rowHeight;
+    setSpacer('space-above', above, columns);
     setSpacer('space-below', (totalRows + 1 - lastRow) * rowHeight, columns);
+    correctSpacerDrift(rows[0], firstRow, above, columns);
+  }
+
+  /**
+   * Where a row actually sits decides where the reader is, so put the first
+   * rendered row exactly where the arithmetic expects it. Table layout rounds
+   * heights its own way, and over millions of rows the two drift apart; left
+   * uncorrected the preview asks for a window it is already showing, which is
+   * a request that answers itself for ever.
+   */
+  function correctSpacerDrift(firstRowElement, firstRow, above, columns) {
+    const tableWrap = byId('table-wrap');
+    const wrapTop = tableWrap.getBoundingClientRect().top;
+    const rowTop = firstRowElement.getBoundingClientRect().top;
+    if (!Number.isFinite(wrapTop) || !Number.isFinite(rowTop)) return;
+    const head = document.querySelector('thead').getBoundingClientRect().height || 0;
+    const actual = rowTop - wrapTop + tableWrap.scrollTop;
+    const expected = head + (firstRow - 2) * rowHeight;
+    const drift = expected - actual;
+    // Only worth correcting once it could put the reader on the wrong row.
+    if (Math.abs(drift) < 0.5 || Math.abs(drift) > rowHeight * maximumWindowRows) return;
+    setSpacer('space-above', above + drift, columns);
   }
 
   /** The data row at the top of the viewport. */
@@ -1216,11 +1244,11 @@ function getLargeFileWebviewHtml() {
     const scoped = hasSelectedSearchColumn();
     const label = scoped ? selectedSearchColumnLabel() : '';
     byId('filter').placeholder = scoped
-      ? 'Find in column ' + label
-      : 'Find in file';
+      ? 'Find in column ' + label + ' — press Enter'
+      : 'Find in file — press Enter';
     byId('filter').title = scoped
       ? 'Searching column ' + label + ' only, through the whole file; click its column header again to search every column'
-      : 'Searching the whole file; Enter and Shift+Enter move between matches, loading pages as needed';
+      : 'Press Enter to search the whole file, then Enter and Shift+Enter to move between matches';
     byId('search-scope').textContent = scoped ? 'Column ' + label + ' only' : '';
   }
 
@@ -1271,7 +1299,15 @@ function getLargeFileWebviewHtml() {
 
   function updateMatchCount() {
     const countEl = byId('filter-count');
-    if (!byId('filter').value.trim()) { countEl.textContent = ''; return; }
+    const query = byId('filter').value.trim();
+    if (!query) { countEl.textContent = ''; return; }
+    if (query !== fileSearchQuery) {
+      // Nothing has been read for this query yet, so only say what is on screen.
+      countEl.textContent = matches.length
+        ? matches.length.toLocaleString() + ' on screen · Enter to search the file'
+        : 'Enter to search the file';
+      return;
+    }
     const scanning = fileSearchDone ? '' : ' · searching… ' + fileScannedRows.toLocaleString() + ' rows';
     if (!fileMatches.length) {
       countEl.textContent = fileSearchDone ? '0 results' : 'Searching… ' + fileScannedRows.toLocaleString() + ' rows';
@@ -1378,9 +1414,10 @@ function getLargeFileWebviewHtml() {
     clearRowHighlight();
     selectedSearchColumn = selectedSearchColumn === column ? null : column;
     syncSelectedSearchColumn();
-    // A different scope is a different result set, so the file is read again;
-    // clearing the old results first keeps the repaint from restoring them.
-    requestFileSearch(true);
+    // A different scope is a different result set. Read the file again only if
+    // the reader had already asked for it; otherwise just repaint.
+    if (fileSearchQuery) requestFileSearch(true);
+    else discardFileMatches();
     runSearch();
   }
 
@@ -1411,7 +1448,8 @@ function getLargeFileWebviewHtml() {
       selectedSearchColumn = null;
       syncSelectedSearchColumn();
       // Cancel whole-column selection without scrolling away from the click.
-      requestFileSearch(false);
+      if (fileSearchQuery) requestFileSearch(false);
+      else discardFileMatches();
       runSearch();
     }
     highlightRow(cell.parentElement);
@@ -1429,12 +1467,29 @@ function getLargeFileWebviewHtml() {
       '#table-wrap thead tr > th:nth-child(' + childIndex + ')';
   }
 
+  /**
+   * Typing only highlights what is already on screen. Reading the whole file is
+   * what Enter is for: a half-typed word would otherwise send the reader off to
+   * a match for a query they had not finished.
+   */
   function scheduleSearch() {
     clearTimeout(filterTimer);
     filterTimer = setTimeout(() => {
-      requestFileSearch(true);
+      // The results on screen belong to the query that produced them.
+      if (byId('filter').value.trim() !== fileSearchQuery) discardFileMatches();
       runSearch();
     }, filterDelayMs);
+  }
+
+  function discardFileMatches() {
+    fileMatches = [];
+    fileMatchIndex = -1;
+    fileSearchQuery = '';
+    fileSearchDone = false;
+    fileSearchTruncated = false;
+    fileScannedRows = 0;
+    pendingMatchFocus = null;
+    following = false;
   }
 
   function requestNextPage() {
@@ -1455,13 +1510,18 @@ function getLargeFileWebviewHtml() {
     const wanted = rowAtViewportTop();
     const firstRow = Number(rows[0].dataset.rowNumber);
     const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
-    if (wanted < firstRow || wanted > lastRow) requestRow(wanted);
+    if (wanted >= firstRow && wanted <= lastRow) return;
+    // The answer to that row is already in: asking again would only produce the
+    // same window. Wait for the reader to move rather than loop.
+    if (wanted === lastRequestedRow) return;
+    requestRow(wanted);
   }
 
   /** Load whichever page holds a row, however far away it is. */
   function requestRow(row) {
     if (loading || pageRequested) return;
     pageRequested = true;
+    lastRequestedRow = row;
     vscode.postMessage({ type: 'gotoRow', row: row });
   }
 
@@ -1479,6 +1539,7 @@ function getLargeFileWebviewHtml() {
     lastScrollTop = tableWrap.scrollTop;
     // Scrolling is the reader taking over from a scan that was following along.
     stopFollowing();
+    lastRequestedRow = -1;
 
     if (absoluteScrolling()) {
       const rows = byId('rows').rows;
@@ -1579,7 +1640,16 @@ function getLargeFileWebviewHtml() {
   byId('filter').addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      stepMatch(event.shiftKey ? -1 : 1);
+      clearTimeout(filterTimer);
+      const query = byId('filter').value.trim();
+      if (!query) return;
+      // The first Enter reads the file; later ones walk the results it found.
+      if (query !== fileSearchQuery) {
+        runSearch();
+        requestFileSearch(true);
+      } else {
+        stepMatch(event.shiftKey ? -1 : 1);
+      }
     } else if (event.key === 'Escape') {
       clearTimeout(filterTimer);
       byId('filter').value = '';

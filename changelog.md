@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Searching the large-file preview now starts when you press Enter rather than
+  while you are still typing. Typing highlights the rows already on screen and
+  says how many it found there; Enter reads the file, and Enter again walks the
+  results.
+
+### Fixed
+
+- Scrolling the preview quickly could leave it loading the same window over and
+  over, flickering between a row count and "Loading…" while the scrollbar
+  refused to settle. The preview now measures where a row actually sits instead
+  of trusting its own arithmetic, and accepts a window that does not cover it
+  rather than asking for it again.
+
 ## [0.0.14] - 2026-09-05
 
 ### Fixed

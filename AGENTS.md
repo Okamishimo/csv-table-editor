@@ -184,6 +184,15 @@ Large-file protections are correctness requirements, not optional tuning.
 - Page offsets make any page directly reachable, so dragging the scrollbar loads
   where the reader actually is instead of paging there. A jump the reader made
   keeps its scroll position.
+- Where a row actually sits decides where the reader is. Measure the first
+  rendered row and correct the placeholder above it, because table layout rounds
+  heights its own way and the arithmetic drifts from the layout over millions of
+  rows. Round the row height to whole pixels for the same reason.
+- Loading must converge. A window that does not cover the reader is accepted
+  rather than requested again: only the reader moving makes another request
+  worth making. Without that, a mismatch the answer cannot fix becomes a request
+  that answers itself for ever, which the reader sees as a flickering status and
+  a scrollbar that will not settle.
 - A running scan may show the pages it passes, so the reader can see how far it
   has reached. Following ends the moment the reader scrolls, a result is
   revealed, or the scan finishes; it must never fight them for the viewport.
@@ -191,6 +200,9 @@ Large-file protections are correctness requirements, not optional tuning.
   the file and reports matches as it finds them, starting at the reader's first
   loaded row and wrapping at the end, so every row is examined exactly once.
   Keep the match count bounded and say when it was capped.
+- Typing only highlights the rows already on screen. Reading the file is what
+  Enter does, and a later Enter walks the results it found. A half-typed word
+  must never send the reader off to a match for it.
 - The pager owns one forward stream, so a running scan and the reader's
   scrolling must take turns. Do not let them interleave.
 - Only a search the reader asked for may move them. Results arriving on their

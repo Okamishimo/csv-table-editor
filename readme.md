@@ -94,11 +94,12 @@ space, so the thumb tells you how far from the end you are. Dragging it anywhere
 loads that part of the file directly, and the status line reads
 `Rows 4,902–5,401 of 12,480,913`.
 
-Search covers the **whole file**, not just the rows on screen. Matches start
-appearing while the file is still being read, beginning at the row you are
-looking at and wrapping around the end. Enter and Shift+Enter step between them
-and load whichever page holds the next one; clicking a column header limits the
-search to that column.
+Search covers the **whole file**, not just the rows on screen. Typing
+highlights the rows already loaded; press **Enter** to read the file. Matches
+start appearing while the rest is still being read, beginning at the row you are
+looking at and wrapping around the end. Enter and Shift+Enter then step between
+them and load whichever page holds the next one; clicking a column header limits
+the search to that column.
 Loading adjacent pages keeps the visible record at the same screen position,
 including when older rows leave the window or a search is active.
 
