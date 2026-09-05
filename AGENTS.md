@@ -164,6 +164,15 @@ Large-file protections are correctness requirements, not optional tuning.
   yields without equivalent protection.
 - Preserve bidirectional scrolling through cached pages. Page cache files must
   be unique per document and removed when the document closes.
+- Preview search covers the whole file, not the loaded window. The host streams
+  the file and reports matches as it finds them, starting at the reader's first
+  loaded row and wrapping at the end, so every row is examined exactly once.
+  Keep the match count bounded and say when it was capped.
+- The pager owns one forward stream, so a running scan and the reader's
+  scrolling must take turns. Do not let them interleave.
+- Only a search the reader asked for may move them. Results arriving on their
+  own, and a scan restarted by cancelling a column scope, leave the view where
+  it is; navigation with Enter is what loads a page and scrolls.
 - Preserve a visible row's measured screen position across page insertion and
   eviction; do not estimate offsets from one row's height. Keep browser scroll
   anchoring disabled on the preview scroller and ignore compensation scroll

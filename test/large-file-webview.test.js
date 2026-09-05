@@ -27,6 +27,48 @@ function openPreview(t) {
   };
 }
 
+/**
+ * The matches the host's scan would report for the rows a test has loaded,
+ * in the order the scan reports them: from `fromRow` down, then wrapping.
+ */
+function scanMatches(document, query, { column = -1, fromRow = 0 } = {}) {
+  const needle = query.toLowerCase();
+  const ahead = [];
+  const wrapped = [];
+  for (const row of document.querySelector("tbody").rows) {
+    const rowNumber = Number(row.dataset.rowNumber);
+    const page = Number(row.dataset.pageNumber);
+    const first = column >= 0 ? column : 0;
+    const last = column >= 0 ? column + 1 : row.cells.length - 1;
+    for (let c = first; c < last; c++) {
+      const cell = row.cells[c + 1];
+      if (!cell || !cell.textContent.toLowerCase().includes(needle)) continue;
+      (rowNumber >= fromRow ? ahead : wrapped).push({ r: rowNumber, c, p: page });
+    }
+  }
+  return ahead.concat(wrapped);
+}
+
+/** Answer the webview's latest whole-file search the way the host would. */
+function answerSearch(postedMessages, send, matches, options = {}) {
+  const request = postedMessages.filter((message) => message.type === "searchFile").at(-1);
+  assert.ok(request, "the webview must ask the host to search the file");
+  send({
+    type: "searchMatches",
+    query: request.query,
+    matches,
+    done: options.done !== false,
+    truncated: options.truncated === true,
+    scannedRows: options.scannedRows === undefined ? 200 : options.scannedRows,
+  });
+  return request;
+}
+
+/** Click the element matching a selector, the way the reader would. */
+function click(document, window, selector) {
+  document.querySelector(selector).dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+}
+
 function cellColumnRule(document) {
   return Array.from(document.styleSheets[0].cssRules)
     .find((rule) => rule.selectorText.includes("#table-wrap tbody tr > td:nth-child("));
@@ -110,7 +152,7 @@ test("paging preserves visible row geometry through eviction, fractional heights
 });
 
 test("loading pages refreshes search matches without scrolling back to the current match", async (t) => {
-  const { window, document, send, scrolledCells } = openPreview(t);
+  const { window, document, send, scrolledCells, postedMessages } = openPreview(t);
   const page = { type: "page", mode: "replace", header: ["Name"],
     rows: [["Alice"], ["Alice"]], pageNumber: 2, startRow: 102, endRow: 103,
     done: false, truncatedCells: 0, truncatedColumns: false };
@@ -119,6 +161,11 @@ test("loading pages refreshes search matches without scrolling back to the curre
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // The host reports every match in the file, including rows not loaded yet.
+  answerSearch(postedMessages, send, [
+    { r: 102, c: 0, p: 2 }, { r: 103, c: 0, p: 2 },
+    { r: 202, c: 0, p: 3 }, { r: 2, c: 0, p: 1 },
+  ]);
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const scrollCount = scrolledCells.length;
   for (const mode of ["append", "prepend"]) {
@@ -194,7 +241,7 @@ test("preview cell clicks highlight both axes with bounded DOM changes and one s
   assert.equal(document.getElementById("search-scope").textContent, "Column City only");
   click(first.cells[1]);
   assert.equal(document.querySelectorAll(".search-column").length, 0, "cell clicks cancel the previous whole-column highlight");
-  assert.equal(document.getElementById("filter").placeholder, "Find in loaded rows");
+  assert.equal(document.getElementById("filter").placeholder, "Find in file");
   assert.deepEqual(Array.from(document.querySelectorAll(cellColumnRule(document).selectorText)),
     [headers[1], first.cells[1], second.cells[1]], "only the clicked cell's column remains highlighted");
   send({ ...page, mode: "append", pageNumber: 2, startRow: 102, endRow: 103 });
@@ -247,6 +294,8 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     filter.value = "Alice";
     filter.dispatchEvent(new window.Event("input"));
     await new Promise((resolve) => window.setTimeout(resolve, 175));
+    answerSearch(postedMessages, send,
+      scanMatches(document, "Alice", { column: scoped ? 0 : -1, fromRow: 2 }));
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const matches = Array.from(document.querySelectorAll("td.match"));
     assert.equal(matches.length, scoped ? 2 : 3);
@@ -257,6 +306,8 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     tableWrap.scrollTop = 120;
     tableWrap.scrollLeft = 40;
     click(rows[0].cells[1]);
+    // Cancelling the scope is a different result set, so the file is read again.
+    if (scoped) answerSearch(postedMessages, send, scanMatches(document, "Alice", { fromRow: 2 }));
     assert.equal(document.querySelectorAll(".search-column").length, 0, "even clicking the scoped column cancels its whole-column selection");
     const expectedCurrent = scoped ? rows[0].cells[1] : current;
     const expectedIndex = scoped ? 1 : 2;
@@ -264,7 +315,7 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     click(rows[1].cells[2]);
     await new Promise((resolve) => window.setTimeout(resolve, 175));
     assert.equal(document.getElementById("search-scope").textContent, "");
-    assert.equal(filter.placeholder, "Find in loaded rows");
+    assert.equal(filter.placeholder, "Find in file");
     assert.equal(filter.value, "Alice");
     assert.equal(filter.disabled, false);
     assert.deepEqual(Array.from(document.querySelectorAll("td.match")),
@@ -275,6 +326,9 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     assert.equal(tableWrap.scrollTop, 120);
     assert.equal(tableWrap.scrollLeft, 40);
     assert.equal(rows[1].cells[2].classList.contains("highlighted-cell"), true);
+    assert.deepEqual(postedMessages.filter((message) => message.type === "searchFile")
+      .map((message) => message.column), scoped ? [0, -1] : [-1],
+      "only a scope change starts another scan");
     for (const modifier of ["ctrlKey", "metaKey"]) {
       window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", [modifier]: true, bubbles: true }));
       assert.equal(document.activeElement, filter);
@@ -283,7 +337,6 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
       filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       assert.equal(document.querySelector("td.match-current"), expectedCurrent);
     }
-    assert.deepEqual(JSON.parse(JSON.stringify(postedMessages)), [{ type: "ready" }]);
   }
 });
 
@@ -358,6 +411,9 @@ test("row highlighting preserves whole-window and column-scoped search results a
     filter.value = "Alice";
     filter.dispatchEvent(new window.Event("input"));
     await new Promise((resolve) => window.setTimeout(resolve, 175));
+    answerSearch(postedMessages, (data) =>
+      window.dispatchEvent(new window.MessageEvent("message", { data })),
+      scanMatches(document, "Alice", { column: columnIndex === null ? -1 : columnIndex, fromRow: 2 }));
     const expectedCount = columnIndex === null ? 3 : 2;
     const matches = Array.from(document.querySelectorAll("td.match"));
     assert.equal(matches.length, expectedCount);
@@ -386,7 +442,8 @@ test("row highlighting preserves whole-window and column-scoped search results a
     assert.equal(document.getElementById("filter-count").textContent, `1/${expectedCount} results`);
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     assert.equal(document.querySelector("td.match-current"), current);
-    assert.deepEqual(JSON.parse(JSON.stringify(postedMessages)), [{ type: "ready" }]);
+    assert.deepEqual(postedMessages.map((message) => message.type), ["ready", "searchFile"],
+      "row highlighting never starts another scan");
   }
 });
 
@@ -456,6 +513,7 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   filter.value = "Alice";
   filter.dispatchEvent(new window.Event("input"));
   await new Promise((resolve) => window.setTimeout(resolve, 175));
+  answerSearch(postedMessages, send, scanMatches(document, "Alice", { fromRow: 2 }));
   assert.equal(document.querySelectorAll("tbody td.match").length, 2);
   assert.equal(document.getElementById("filter-count").textContent, "1/2 results");
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -476,11 +534,11 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   cityColumn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(document.querySelectorAll("tbody td.match").length, 2);
   assert.equal(document.getElementById("search-scope").textContent, "");
-  assert.equal(filter.placeholder, "Find in loaded rows");
+  assert.equal(filter.placeholder, "Find in file");
 
   document.querySelector("tbody th.row-number")
     .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  assert.equal(filter.placeholder, "Find in loaded rows", "row numbers never scope search");
+  assert.equal(filter.placeholder, "Find in file", "row numbers never scope search");
   assert.equal(document.getElementById("search-scope").textContent, "");
 
   send({
@@ -739,4 +797,144 @@ test("large-file preview evicts a whole page without re-reading the live row lis
   assert.equal(document.querySelectorAll("tbody tr.highlighted-row").length, 0);
 
   dom.window.close();
+});
+
+test("typing asks the host to read the whole file from where the reader is", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name", "City"],
+    rows: [["Alice", "Taipei"], ["Bob", "Tokyo"]], pageNumber: 4, startRow: 302, endRow: 303,
+    done: false, truncatedCells: 0, truncatedColumns: false });
+
+  const filter = document.getElementById("filter");
+  filter.value = "  Alice  ";
+  filter.dispatchEvent(new window.Event("input"));
+  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 0, "typing is debounced");
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "searchFile", query: "Alice", column: -1, fromRow: 302 },
+    "the scan starts at the first loaded row so results continue from here");
+
+  // Scoping to a column restarts the scan for that column only.
+  click(document, window, 'thead th[data-column-index="1"]');
+  assert.equal(postedMessages.at(-1).column, 1);
+});
+
+test("clearing the query calls off a running scan exactly once", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["Alice"]],
+    pageNumber: 1, startRow: 2, endRow: 2, done: true, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  filter.value = "Alice";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }]);
+
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(document.getElementById("filter-count").textContent, "");
+  assert.equal(document.querySelectorAll("td.match").length, 0);
+  const cancels = postedMessages.filter((message) => message.type === "cancelSearch");
+  assert.equal(cancels.length, 1);
+
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(postedMessages.filter((message) => message.type === "cancelSearch").length, 1,
+    "there is nothing to call off a second time");
+});
+
+test("progress is shown while the file is still being read", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["Alice"]],
+    pageNumber: 1, startRow: 2, endRow: 2, done: false, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  filter.value = "Alice";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  const count = document.getElementById("filter-count");
+
+  send({ type: "searchStarted", query: "Alice" });
+  assert.equal(count.textContent, "Searching… 0 rows");
+
+  answerSearch(postedMessages, send, [], { done: false, scannedRows: 120000 });
+  assert.equal(count.textContent, "Searching… 120,000 rows");
+
+  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }], { done: false, scannedRows: 300000 });
+  assert.equal(count.textContent, "1/1 results · searching… 300,000 rows");
+
+  answerSearch(postedMessages, send, [{ r: 900, c: 0, p: 10 }], { done: true, scannedRows: 400000 });
+  assert.equal(count.textContent, "1/2 results");
+
+  answerSearch(postedMessages, send, [], { done: true, truncated: true, scannedRows: 400000 });
+  assert.match(count.textContent, /\/2\+ results$/, "a capped scan says the total is a floor");
+});
+
+test("results from a superseded query are ignored", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["Alice"]],
+    pageNumber: 1, startRow: 2, endRow: 2, done: true, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  filter.value = "Alice";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+
+  send({ type: "searchMatches", query: "Bob", matches: [{ r: 2, c: 0, p: 1 }],
+    done: true, truncated: false, scannedRows: 10 });
+  assert.equal(document.getElementById("filter-count").textContent, "Searching… 0 rows",
+    "a late report for an older query must not become the result set");
+  assert.equal(postedMessages.filter((message) => message.type === "gotoMatch").length, 0);
+});
+
+test("a match outside the loaded window loads its page and is revealed there", async (t) => {
+  const { window, document, send, postedMessages, scrolledCells } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["plain"], ["plain"]],
+    pageNumber: 1, startRow: 2, endRow: 3, done: false, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  filter.value = "needle";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+
+  // The only match is far away, on a page the reader has never seen.
+  answerSearch(postedMessages, send, [{ r: 5002, c: 0, p: 51 }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoMatch", page: 51, row: 5002, column: 0 });
+  assert.equal(document.getElementById("filter-count").textContent, "1/1 results");
+
+  const scrollsBefore = scrolledCells.length;
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["needle"], ["plain"]],
+    pageNumber: 51, startRow: 5002, endRow: 5003, done: false,
+    truncatedCells: 0, truncatedColumns: false, focus: { row: 5002, column: 0 } });
+
+  const current = document.querySelector("td.match-current");
+  assert.ok(current, "the match is marked once its page arrives");
+  assert.equal(current.textContent, "needle");
+  assert.equal(current.parentElement.dataset.rowNumber, "5002");
+  assert.equal(scrolledCells.length, scrollsBefore + 1, "the reader is taken to it");
+  assert.equal(document.getElementById("filter-count").textContent, "1/1 results");
+});
+
+test("navigation wraps from the last match back to the first", async (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"], rows: [["needle"], ["needle"]],
+    pageNumber: 1, startRow: 2, endRow: 3, done: false, truncatedCells: 0, truncatedColumns: false });
+  const filter = document.getElementById("filter");
+  filter.value = "needle";
+  filter.dispatchEvent(new window.Event("input"));
+  await new Promise((resolve) => window.setTimeout(resolve, 175));
+  // Two matches here, one far below: the scan reports them in reading order.
+  answerSearch(postedMessages, send,
+    [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }, { r: 900, c: 0, p: 10 }]);
+
+  const count = document.getElementById("filter-count");
+  assert.equal(count.textContent, "1/3 results");
+  const next = () => filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  next();
+  assert.equal(count.textContent, "2/3 results");
+  next();
+  assert.equal(count.textContent, "3/3 results");
+  assert.equal(postedMessages.at(-1).type, "gotoMatch", "the third match is on another page");
+  next();
+  assert.equal(count.textContent, "1/3 results", "past the end, navigation wraps to the first match");
+
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+  assert.equal(count.textContent, "3/3 results", "and backwards from the first to the last");
 });

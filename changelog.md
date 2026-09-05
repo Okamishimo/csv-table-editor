@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The large-file preview now searches the whole file instead of only the rows
+  it has loaded. The host streams the file and reports matches as it finds
+  them, beginning at the row on screen and wrapping at the end of the file, so
+  results appear while the rest is still being read. Enter and Shift+Enter move
+  between matches anywhere in the file, loading the page that holds one when it
+  is outside the current window, and the counter reports progress while the
+  scan runs.
+
 ### Changed
 
 - The editable grid renders only the rows near the viewport instead of building

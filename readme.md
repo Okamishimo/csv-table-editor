@@ -85,9 +85,14 @@ Private automatic updates require the one-time authentication setup below.
 The editable grid is an in-memory editor. Local files larger than 64 MiB open
 in a streaming, read-only preview instead. Scrolling near either end loads the
 adjacent 100 rows, so you can move forward and backward without keeping the
-complete file in memory. The visible table stays bounded to 500 rows, supports
-searching the loaded window (including column-only search) and lets you change the
-detected encoding.
+complete file in memory. The visible table stays bounded to 500 rows and lets
+you change the detected encoding.
+
+Search covers the **whole file**, not just the rows on screen. Matches start
+appearing while the file is still being read, beginning at the row you are
+looking at and wrapping around the end. Enter and Shift+Enter step between them
+and load whichever page holds the next one; clicking a column header limits the
+search to that column.
 Loading adjacent pages keeps the visible record at the same screen position,
 including when older rows leave the window or a search is active.
 

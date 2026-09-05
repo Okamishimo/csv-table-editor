@@ -23,6 +23,11 @@ const MAX_PREVIEW_COLUMNS = 100;
 const MAX_PREVIEW_CELL_CHARS = 4_096;
 const MAX_PREVIEW_ROW_CHARS = 32_768;
 const EDITABLE_OVERRIDES = new Set();
+/** Positions kept for one whole-file search. Enough to navigate, bounded so a
+ *  query matching most of a multi-gigabyte file cannot exhaust the host. */
+const SEARCH_MATCH_LIMIT = 20000;
+/** How often a running scan reports what it has found so far. */
+const SEARCH_REPORT_ROWS = 4000;
 
 async function createLargeDocumentIfNeeded(uri, openContext, vscode, encodingApi) {
   if (!uri || uri.scheme === "untitled") return null;
@@ -111,6 +116,15 @@ class LargeCsvDocument {
   async previousPage(beforePage) {
     if (!this._pager) await this.resetPager();
     return this._pager.previousPage(beforePage);
+  }
+
+  async pageAt(pageNumber) {
+    if (!this._pager) await this.resetPager();
+    return this._pager.pageAt(pageNumber);
+  }
+
+  get rowsSeen() {
+    return this._pager ? this._pager.rowsSeen : 0;
   }
 
   async reopenWithEncoding(encodingKey) {
@@ -228,6 +242,18 @@ class CsvStreamPager {
     const targetPage = Number(beforePage) - 1;
     if (!Number.isInteger(targetPage) || targetPage < 1) return null;
     return this.readCachedPage(targetPage);
+  }
+
+  /**
+   * Any page that has been read, plus the next one. Pages already seen come
+   * from the cache, so a search that has passed a page can hand it back
+   * without streaming the file again.
+   */
+  async pageAt(pageNumber) {
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
+    if (pageNumber <= this.pageNumber) return this.readCachedPage(pageNumber);
+    if (pageNumber === this.pageNumber + 1) return this.nextPage(this.pageNumber);
+    return null;
   }
 
   async cachePage(page) {
@@ -411,6 +437,73 @@ class StreamingCsvParser {
   }
 }
 
+/**
+ * Walk the whole file for a query, reporting matches as they are found.
+ *
+ * Matches at or after `fromRow` are reported first, in file order, so
+ * navigation continues from where the reader is. The ones before it are held
+ * back and reported at the end, which is the wrap around the end of the file.
+ * Either way the scan covers every row exactly once.
+ *
+ * Pages the scan passes are cached by the pager, so jumping to any match it
+ * reported never re-reads the file.
+ */
+async function searchLargeFile(document, request, hooks) {
+  const needle = typeof request.query === "string" ? request.query.trim().toLocaleLowerCase() : "";
+  if (!needle) return;
+  const column = Number.isInteger(request.column) && request.column >= 0 ? request.column : -1;
+  const fromRow = Number.isFinite(request.fromRow) ? Number(request.fromRow) : 0;
+
+  const wrapped = [];
+  let ahead = [];
+  let total = 0;
+  let scannedRows = 0;
+  let rowsSinceReport = 0;
+  let truncated = false;
+
+  const report = (done) => {
+    const matches = ahead;
+    ahead = [];
+    rowsSinceReport = 0;
+    hooks.report({ matches, done, total, truncated, scannedRows });
+  };
+
+  for (let pageNumber = 1; !truncated; pageNumber++) {
+    if (hooks.cancelled()) return;
+    const page = await hooks.serialize(() => document.pageAt(pageNumber));
+    if (!page) break;
+
+    for (const [index, row] of page.rows.entries()) {
+      const rowNumber = page.startRow + index;
+      const first = column >= 0 ? column : 0;
+      const last = column >= 0 ? Math.min(column + 1, row.length) : row.length;
+      for (let c = first; c < last; c++) {
+        const value = row[c];
+        if (value == null || !String(value).toLocaleLowerCase().includes(needle)) continue;
+        total++;
+        if (total > SEARCH_MATCH_LIMIT) { truncated = true; break; }
+        const match = { r: rowNumber, c: c, p: page.pageNumber };
+        if (rowNumber >= fromRow) ahead.push(match);
+        else wrapped.push(match);
+      }
+      if (truncated) break;
+    }
+
+    scannedRows += page.rows.length;
+    rowsSinceReport += page.rows.length;
+    // Report often enough that the reader can jump to an early match while the
+    // rest of the file is still being read.
+    if (!truncated && (ahead.length > 0 || rowsSinceReport >= SEARCH_REPORT_ROWS)) report(false);
+    if (page.done) break;
+  }
+
+  if (hooks.cancelled()) return;
+  if (truncated) total = SEARCH_MATCH_LIMIT;
+  // The wrap: everything above where the reader started, in file order.
+  ahead = ahead.concat(wrapped);
+  report(true);
+}
+
 async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
   panel.webview.options = { enableScripts: true };
   panel.webview.html = getLargeFileWebviewHtml();
@@ -427,26 +520,63 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
     canEnableEditing: document.canEnableEditing,
     hardLimit: HARD_MAX_FILE_SIZE_MB,
   });
-  const loadPage = async (mode, adjacentPage) => {
+  // One reader at a time. The pager owns a single forward stream, so a running
+  // search and the reader's scrolling must take turns rather than interleave.
+  let queue = Promise.resolve();
+  const serialize = (task) => {
+    const run = queue.then(() => task());
+    queue = run.then(() => {}, () => {});
+    return run;
+  };
+
+  let searchToken = 0;
+  const cancelSearch = () => { searchToken++; };
+
+  const loadPage = async (mode, adjacentPage, focus) => {
     if (loading) return;
     loading = true;
     post({ type: "loading", loading: true });
     try {
       let page;
       if (mode === "replace") {
-        await document.resetPager();
-        page = await document.nextPage();
+        // A fresh stream invalidates every cached page, so any search built on
+        // them is void as well.
+        cancelSearch();
+        await serialize(() => document.resetPager());
+        page = await serialize(() => document.nextPage());
       } else if (mode === "prepend") {
-        page = await document.previousPage(adjacentPage);
+        page = await serialize(() => document.previousPage(adjacentPage));
+      } else if (mode === "goto") {
+        page = await serialize(() => document.pageAt(adjacentPage));
       } else {
-        page = await document.nextPage(adjacentPage);
+        page = await serialize(() => document.nextPage(adjacentPage));
       }
-      if (page) post({ type: "page", mode, ...page });
+      if (page) post({ type: "page", mode: mode === "goto" ? "replace" : mode, ...page, focus: focus || null });
     } catch (error) {
       post({ type: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
       loading = false;
       post({ type: "loading", loading: false });
+    }
+  };
+
+  const runSearch = async (message) => {
+    cancelSearch();
+    const token = searchToken;
+    post({ type: "searchStarted", query: message.query });
+    try {
+      await searchLargeFile(document, message, {
+        serialize,
+        cancelled: () => token !== searchToken,
+        report: (update) => {
+          if (token !== searchToken) return;
+          post({ type: "searchMatches", query: message.query, ...update });
+        },
+      });
+    } catch (error) {
+      if (token !== searchToken) return;
+      post({ type: "error", message: error instanceof Error ? error.message : String(error) });
+      post({ type: "searchMatches", query: message.query, matches: [], done: true, total: 0, truncated: false, scannedRows: 0 });
     }
   };
 
@@ -464,6 +594,15 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
         break;
       case "restart":
         await loadPage("replace");
+        break;
+      case "searchFile":
+        await runSearch(message);
+        break;
+      case "cancelSearch":
+        cancelSearch();
+        break;
+      case "gotoMatch":
+        await loadPage("goto", message.page, { row: message.row, column: message.column });
         break;
       case "pickEncoding": {
         const items = encodingApi.SUPPORTED_ENCODINGS.map((encoding) => ({
@@ -492,6 +631,7 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
 
   const fontSubscription = watchFontFamily(vscode, panel.webview);
   panel.onDidDispose(() => {
+    cancelSearch();
     messageSubscription.dispose();
     fontSubscription.dispose();
   });
@@ -631,7 +771,7 @@ function getLargeFileWebviewHtml() {
     <span class="muted" id="file-size"></span>
     <button id="encoding" title="Choose another encoding"></button>
     <span class="muted" id="delimiter"></span>
-    <input id="filter" type="search" placeholder="Find in loaded rows">
+    <input id="filter" type="search" placeholder="Find in file">
     <span class="muted" id="filter-count"></span>
     <span class="muted" id="search-scope"></span>
     <span class="spacer"></span>
@@ -664,8 +804,21 @@ function getLargeFileWebviewHtml() {
   let highlightedCellElement = null;
   let highlightedColumnRule = null;
   let matches = [];
-  let matchIndex = -1;
   let currentMatchCell = null;
+  /** Whole-file matches in the order navigation visits them: from where the
+   *  reader was when the search started, down to the end, then wrapping to the
+   *  top. The host streams them in as it reads the file. */
+  let fileMatches = [];
+  let fileMatchIndex = -1;
+  let fileSearchQuery = '';
+  let fileSearchDone = false;
+  let fileSearchTruncated = false;
+  let fileScannedRows = 0;
+  let pendingMatchFocus = null;
+  /** Whether the reader asked for this search, and may therefore be taken to
+   *  its first result. A scan restarted by cancelling a column scope must not
+   *  move them away from the cell they just clicked. */
+  let fileSearchReveals = true;
 
   function applyFontFamily(value) {
     const fontFamily = typeof value === 'string' && value.trim()
@@ -770,7 +923,7 @@ function getLargeFileWebviewHtml() {
     if (highlightedRowElement && !body.contains(highlightedRowElement)) clearRowHighlight();
     syncSelectedSearchColumn();
     // A page arriving while nothing is searched has no highlights to redo.
-    if (matches.length || byId('filter').value.trim()) runSearch(true, false);
+    if (matches.length || byId('filter').value.trim()) runSearch();
     const visibleRows = body.rows;
     if (visibleRows.length) {
       const firstVisibleRow = visibleRows[0];
@@ -787,6 +940,19 @@ function getLargeFileWebviewHtml() {
       byId('status').textContent = 'No data rows';
     }
     lastScrollTop = tableWrap.scrollTop;
+    if (page.focus) {
+      // This page was loaded to show one match; reveal it now that it exists.
+      pendingMatchFocus = null;
+      const cell = loadedCell(page.focus.row, page.focus.column);
+      if (cell) {
+        setCurrentMatchCell(cell);
+        if (typeof cell.scrollIntoView === 'function') {
+          cell.scrollIntoView({ block: 'center', inline: 'center' });
+        }
+        lastScrollTop = tableWrap.scrollTop;
+      }
+      updateMatchCount();
+    }
     const notes = [];
     if (page.truncatedCells) notes.push(page.truncatedCells + ' long cells truncated in preview');
     if (page.truncatedColumns) notes.push('columns after 100 hidden');
@@ -815,10 +981,10 @@ function getLargeFileWebviewHtml() {
     const label = scoped ? selectedSearchColumnLabel() : '';
     byId('filter').placeholder = scoped
       ? 'Find in column ' + label
-      : 'Find in loaded rows';
+      : 'Find in file';
     byId('filter').title = scoped
-      ? 'Searching column ' + label + ' only; click its column header again to search all loaded rows'
-      : 'Searching all loaded rows; click a column header to limit the search';
+      ? 'Searching column ' + label + ' only, through the whole file; click its column header again to search every column'
+      : 'Searching the whole file; Enter and Shift+Enter move between matches, loading pages as needed';
     byId('search-scope').textContent = scoped ? 'Column ' + label + ' only' : '';
   }
 
@@ -849,28 +1015,44 @@ function getLargeFileWebviewHtml() {
     currentMatchCell = null;
   }
 
-  function focusMatch(scrollToMatch = true) {
-    if (currentMatchCell) currentMatchCell.classList.remove('match-current');
-    currentMatchCell = null;
-    const cell = matches[matchIndex];
-    if (!cell) return;
-    cell.classList.add('match-current');
-    currentMatchCell = cell;
-    if (scrollToMatch && typeof cell.scrollIntoView === 'function') {
-      cell.scrollIntoView({ block: 'center', inline: 'center' });
-    }
-    byId('filter-count').textContent = (matchIndex + 1) + '/' + matches.length + ' results';
+  /** The cell for a file row and column, when that row is loaded. */
+  function loadedCell(row, column) {
+    const tr = document.querySelector('tbody tr[data-row-number="' + row + '"]');
+    // cells[0] is the row-number header, so data column c sits at c + 1.
+    return tr ? tr.cells[column + 1] || null : null;
   }
 
-  function runSearch(keepIndex, scrollToMatch = true) {
+  function setCurrentMatchCell(cell) {
+    if (currentMatchCell) currentMatchCell.classList.remove('match-current');
+    currentMatchCell = cell;
+    if (!cell) return;
+    if (!cell.classList.contains('match')) {
+      cell.classList.add('match');
+      matches.push(cell);
+    }
+    cell.classList.add('match-current');
+  }
+
+  function updateMatchCount() {
+    const countEl = byId('filter-count');
+    if (!byId('filter').value.trim()) { countEl.textContent = ''; return; }
+    const scanning = fileSearchDone ? '' : ' · searching… ' + fileScannedRows.toLocaleString() + ' rows';
+    if (!fileMatches.length) {
+      countEl.textContent = fileSearchDone ? '0 results' : 'Searching… ' + fileScannedRows.toLocaleString() + ' rows';
+      return;
+    }
+    const total = fileMatches.length.toLocaleString() + (fileSearchTruncated ? '+' : '');
+    const position = (fileMatchIndex < 0 ? 0 : fileMatchIndex) + 1;
+    countEl.textContent = position + '/' + total + ' results' + scanning;
+  }
+
+  /** Highlight the query inside the loaded window. Never scrolls: paging must
+   *  not move the reader, and navigation does its own scrolling. */
+  function runSearch() {
     clearSearchHighlights();
     const needle = byId('filter').value.trim().toLocaleLowerCase();
     matches = [];
-    if (!needle) {
-      matchIndex = -1;
-      byId('filter-count').textContent = '';
-      return;
-    }
+    if (!needle) { updateMatchCount(); return; }
     const scopedColumn = hasSelectedSearchColumn() ? selectedSearchColumn : -1;
     const rows = document.querySelector('tbody').rows;
     for (const row of rows) {
@@ -887,26 +1069,77 @@ function getLargeFileWebviewHtml() {
         }
       }
     }
-    if (!matches.length) {
-      matchIndex = -1;
-      byId('filter-count').textContent = '0 results';
+    const current = fileMatches[fileMatchIndex];
+    if (current) setCurrentMatchCell(loadedCell(current.r, current.c));
+    updateMatchCount();
+  }
+
+  /** Ask the host to read the whole file for the current query. The scan starts
+   *  at the first loaded row and wraps, so results arrive in the order the
+   *  reader would walk them. */
+  function requestFileSearch(reveal) {
+    fileSearchReveals = reveal !== false;
+    const query = byId('filter').value.trim();
+    const wasSearching = fileSearchQuery !== '';
+    fileMatches = [];
+    fileMatchIndex = -1;
+    fileSearchDone = false;
+    fileSearchTruncated = false;
+    fileScannedRows = 0;
+    pendingMatchFocus = null;
+    fileSearchQuery = query;
+    if (!query) {
+      // Nothing was running, so there is nothing to call off.
+      if (wasSearching) vscode.postMessage({ type: 'cancelSearch' });
+      updateMatchCount();
       return;
     }
-    if (!keepIndex || matchIndex < 0 || matchIndex >= matches.length) matchIndex = 0;
-    focusMatch(scrollToMatch);
+    const rows = document.querySelector('tbody').rows;
+    vscode.postMessage({
+      type: 'searchFile',
+      query: query,
+      column: hasSelectedSearchColumn() ? selectedSearchColumn : -1,
+      fromRow: rows.length ? Number(rows[0].dataset.rowNumber) || 0 : 0,
+    });
+    updateMatchCount();
+  }
+
+  /** Show the current whole-file match, loading its page when it is not here. */
+  function revealCurrentMatch(scrollToMatch) {
+    const match = fileMatches[fileMatchIndex];
+    if (!match) { updateMatchCount(); return; }
+    const cell = loadedCell(match.r, match.c);
+    if (cell) {
+      setCurrentMatchCell(cell);
+      if (scrollToMatch && typeof cell.scrollIntoView === 'function') {
+        cell.scrollIntoView({ block: 'center', inline: 'center' });
+      }
+      updateMatchCount();
+      return;
+    }
+    // Results arriving on their own leave the reader where they are.
+    if (!scrollToMatch) { updateMatchCount(); return; }
+    // The match is outside the loaded window. Its page was cached by the scan
+    // that found it, so this does not re-read the file.
+    pendingMatchFocus = match;
+    updateMatchCount();
+    vscode.postMessage({ type: 'gotoMatch', page: match.p, row: match.r, column: match.c });
   }
 
   function stepMatch(delta) {
-    if (!matches.length) return;
-    matchIndex = (matchIndex + delta + matches.length) % matches.length;
-    focusMatch();
+    if (!fileMatches.length) return;
+    fileMatchIndex = (fileMatchIndex + delta + fileMatches.length) % fileMatches.length;
+    revealCurrentMatch(true);
   }
 
   function selectSearchColumn(column) {
     clearRowHighlight();
     selectedSearchColumn = selectedSearchColumn === column ? null : column;
     syncSelectedSearchColumn();
-    runSearch(false);
+    // A different scope is a different result set, so the file is read again;
+    // clearing the old results first keeps the repaint from restoring them.
+    requestFileSearch(true);
+    runSearch();
   }
 
   function clearRowHighlight() {
@@ -936,7 +1169,8 @@ function getLargeFileWebviewHtml() {
       selectedSearchColumn = null;
       syncSelectedSearchColumn();
       // Cancel whole-column selection without scrolling away from the click.
-      runSearch(false, false);
+      requestFileSearch(false);
+      runSearch();
     }
     highlightRow(cell.parentElement);
     highlightedCellElement = cell;
@@ -955,7 +1189,10 @@ function getLargeFileWebviewHtml() {
 
   function scheduleSearch() {
     clearTimeout(filterTimer);
-    filterTimer = setTimeout(() => runSearch(false), filterDelayMs);
+    filterTimer = setTimeout(() => {
+      requestFileSearch(true);
+      runSearch();
+    }, filterDelayMs);
   }
 
   function requestNextPage() {
@@ -1017,6 +1254,23 @@ function getLargeFileWebviewHtml() {
       if (!loading) pageRequested = false;
       byId('edit').disabled = message.loading;
       if (message.loading) byId('status').textContent = 'Loading…';
+    } else if (message.type === 'searchStarted') {
+      // A scan for an older query may still be reporting; ignore it from here.
+      if (message.query === fileSearchQuery) updateMatchCount();
+    } else if (message.type === 'searchMatches') {
+      if (message.query !== fileSearchQuery) return;
+      const hadNone = fileMatches.length === 0;
+      for (const match of message.matches) fileMatches.push(match);
+      fileScannedRows = message.scannedRows;
+      fileSearchTruncated = message.truncated;
+      fileSearchDone = message.done;
+      if (hadNone && fileMatches.length) {
+        // The first result the scan reaches from where the reader is.
+        fileMatchIndex = 0;
+        revealCurrentMatch(fileSearchReveals);
+      } else {
+        updateMatchCount();
+      }
     } else if (message.type === 'error') {
       byId('error').textContent = message.message;
       byId('error').style.display = 'block';
@@ -1029,8 +1283,10 @@ function getLargeFileWebviewHtml() {
       event.preventDefault();
       stepMatch(event.shiftKey ? -1 : 1);
     } else if (event.key === 'Escape') {
+      clearTimeout(filterTimer);
       byId('filter').value = '';
-      runSearch(false);
+      requestFileSearch(false);
+      runSearch();
       byId('filter').blur();
     }
   });
@@ -1073,6 +1329,8 @@ function getLargeFileWebviewHtml() {
 }
 
 module.exports = {
+  SEARCH_MATCH_LIMIT,
+  searchLargeFile,
   LargeCsvDocument,
   CsvStreamPager,
   StreamingCsvParser,
