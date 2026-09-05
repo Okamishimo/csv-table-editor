@@ -1066,14 +1066,48 @@ test("scrolling inside the loaded window fetches neighbours rather than jumping"
 });
 
 test("scrolling up from a window that starts mid-file pages backwards", (t) => {
-  const { send, page, index, scrollTo, offsetOfRow, postedMessages } = openMeasuredPreview(t);
-  page(20, "replace");
+  const { send, page, index, scrollTo, offsetOfRow, postedMessages, wrap } = openMeasuredPreview(t);
+  page(1, "replace");
   index(10000);
-  send({ type: "loading", loading: false });
 
+  // Drag far away, and let the host answer the way it does for a jump.
   scrollTo(offsetOfRow(1905));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoRow", row: 1905 });
+  page(20, "replace", { keepScroll: true });
+  send({ type: "loading", loading: false });
+  assert.equal(wrap.scrollTop, offsetOfRow(1905), "the jump landed where the reader dragged");
+  assert.equal(postedMessages.at(-1).type, "gotoRow",
+    "the window covers where they are, so nothing more is fetched");
+
+  // Now edge towards the top of that window.
+  scrollTo(offsetOfRow(1904));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "previousPage", beforePage: 20 });
+});
+
+test("a drag that outruns the answer is reconciled once the answer arrives", (t) => {
+  const { send, page, index, scrollTo, offsetOfRow, postedMessages, wrap } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+
+  // The reader drags to row 3000; that request goes out.
+  scrollTo(offsetOfRow(3000));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoRow", row: 3000 });
+
+  // They keep dragging while it is in flight, so the next positions are dropped.
+  send({ type: "loading", loading: true });
+  scrollTo(offsetOfRow(7000));
+  assert.equal(postedMessages.at(-1).row, 3000, "one request is in flight at a time");
+
+  // The stale answer arrives and does not cover where they ended up.
+  page(30, "replace", { keepScroll: true });
+  send({ type: "loading", loading: false });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoRow", row: 7000 }, "so the preview fetches where they actually stopped");
+  assert.equal(wrap.scrollTop, offsetOfRow(7000), "without moving them again");
 });
 
 test("while a scan sweeps the file the view follows it, until the reader takes over", async (t) => {

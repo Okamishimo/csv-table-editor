@@ -667,8 +667,16 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
         page = await serialize(() => document.nextPage(adjacentPage));
       }
       if (page) {
-        const rendered = mode === "goto" || mode === "row" ? "replace" : mode;
-        post({ type: "page", mode: rendered, ...page, focus: focus || null });
+        // A jump replaces the window, but the reader already chose where to be:
+        // dragging the scrollbar must not throw them back to the first row.
+        const jumped = mode === "goto" || mode === "row";
+        post({
+          type: "page",
+          mode: jumped ? "replace" : mode,
+          ...page,
+          focus: focus || null,
+          keepScroll: mode === "row",
+        });
       }
     } catch (error) {
       post({ type: "error", message: error instanceof Error ? error.message : String(error) });
@@ -694,7 +702,9 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
           const now = Date.now();
           if (now - lastFollow < SCAN_FOLLOW_INTERVAL_MS) return;
           lastFollow = now;
-          post({ type: "page", mode: "replace", ...page, follow: true });
+          // Same shape as every other page message, so the preview never has
+          // to guess which fields a page carries.
+          post({ type: "page", mode: "replace", ...page, focus: null, keepScroll: false, follow: true });
         },
         report: (update) => {
           if (token !== searchToken) return;
@@ -1433,6 +1443,21 @@ function getLargeFileWebviewHtml() {
     vscode.postMessage({ type: 'nextPage', afterPage: lastPageNumber });
   }
 
+  /**
+   * One request is in flight at a time, so a fast drag can outrun it and land
+   * somewhere the answer does not cover. Once it arrives, fetch where the
+   * reader actually ended up.
+   */
+  function reconcileWindow() {
+    if (!absoluteScrolling() || loading || pageRequested) return;
+    const rows = byId('rows').rows;
+    if (!rows.length) return;
+    const wanted = rowAtViewportTop();
+    const firstRow = Number(rows[0].dataset.rowNumber);
+    const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
+    if (wanted < firstRow || wanted > lastRow) requestRow(wanted);
+  }
+
   /** Load whichever page holds a row, however far away it is. */
   function requestRow(row) {
     if (loading || pageRequested) return;
@@ -1512,6 +1537,7 @@ function getLargeFileWebviewHtml() {
       if (!loading) pageRequested = false;
       byId('edit').disabled = message.loading;
       if (message.loading) byId('status').textContent = 'Loading…';
+      if (!loading) reconcileWindow();
     } else if (message.type === 'fileIndex') {
       indexedBytes = message.indexedBytes || 0;
       indexSize = message.size || 0;
