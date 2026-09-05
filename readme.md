@@ -15,6 +15,8 @@ diff and roll back to.
 - Only the rows near the viewport are rendered, so long files scroll, sort and
   search without the editor building a DOM for every row.
 - Full undo/redo through the standard `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`.
+- Saving a large file takes the time it needs and says so in the status bar; it
+  never writes a partial or empty file to meet a deadline.
 
 ### Pick your encoding
 

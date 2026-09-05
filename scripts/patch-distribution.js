@@ -20,14 +20,17 @@ const fontOnlyWebview = `t.webview.html=require("../src/font-settings").decorate
 const scopedSearchWebview = `t.webview.html=require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview}));`;
 const gridPerformanceWebview = `t.webview.html=require("../src/grid-performance").decorateWebviewHtml(require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview})));`;
 const gridVirtualizationWebview = `t.webview.html=require("../src/grid-virtualization").decorateWebviewHtml(require("../src/grid-performance").decorateWebviewHtml(require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview}))));`;
+const editHistoryWebview = `t.webview.html=require("../src/edit-history").decorateWebviewHtml(require("../src/grid-virtualization").decorateWebviewHtml(require("../src/grid-performance").decorateWebviewHtml(require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview})))));`;
 
 // Upgrade a bundle patched by an earlier version to the current decorator chain.
 if (bundle.includes(fontOnlyWebview)) {
-  bundle = bundle.replace(fontOnlyWebview, gridVirtualizationWebview);
+  bundle = bundle.replace(fontOnlyWebview, editHistoryWebview);
 } else if (bundle.includes(scopedSearchWebview)) {
-  bundle = bundle.replace(scopedSearchWebview, gridVirtualizationWebview);
+  bundle = bundle.replace(scopedSearchWebview, editHistoryWebview);
 } else if (bundle.includes(gridPerformanceWebview)) {
-  bundle = bundle.replace(gridPerformanceWebview, gridVirtualizationWebview);
+  bundle = bundle.replace(gridPerformanceWebview, editHistoryWebview);
+} else if (bundle.includes(gridVirtualizationWebview)) {
+  bundle = bundle.replace(gridVirtualizationWebview, editHistoryWebview);
 }
 
 // Upgrade a bundle patched by an earlier version: the detector now views the
@@ -35,6 +38,14 @@ if (bundle.includes(fontOnlyWebview)) {
 const copyingDetectCall = 'require("../src/encoding-detector").detectEncoding(Buffer.from(e),s)';
 const viewingDetectCall = 'require("../src/encoding-detector").detectEncoding(e,s)';
 if (bundle.includes(copyingDetectCall)) bundle = bundle.replace(copyingDetectCall, viewingDetectCall);
+
+// Upgrade a bundle whose save bypasses predate the progress reporting.
+const plainSave = 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);await e.save(t),await this.captureHistory(e,e.uri)}';
+const reportedSave = 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{await e.save(t),await this.captureHistory(e,e.uri)})}';
+if (bundle.includes(plainSave)) bundle = bundle.replace(plainSave, reportedSave);
+const plainSaveAs = 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);await e.saveAs(t,n),await this.captureHistory(e,t)}';
+const reportedSaveAs = 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);return require("../src/save-progress").withSaveProgress(s,t,async()=>{await e.saveAs(t,n),await this.captureHistory(e,t)})}';
+if (bundle.includes(plainSaveAs)) bundle = bundle.replace(plainSaveAs, reportedSaveAs);
 
 const replacements = [
   {
@@ -79,9 +90,9 @@ const replacements = [
       to: 'async resolveCustomEditor(e,t,n){if(e.isLargeFile)return require("../src/large-file-mode").resolveLargeFileEditor(e,t,s,d);this._panels.set(e,t)',
   },
   {
-    name: "editable grid font, column-scoped search, performance and virtualization support",
+    name: "editable grid font, column-scoped search, performance, virtualization and history support",
     from: 'this._panels.set(e,t),t.webview.options={enableScripts:!0},t.webview.html=(0,l.getWebviewHtml)(t.webview,this._context.extensionUri);',
-    to: 'this._panels.set(e,t),t.webview.options={enableScripts:!0},' + gridVirtualizationWebview,
+    to: 'this._panels.set(e,t),t.webview.options={enableScripts:!0},' + editHistoryWebview,
   },
   {
     name: "editable grid initial font",
@@ -94,14 +105,31 @@ const replacements = [
     to: 'const i=t.webview.onDidReceiveMessage(t=>this.onMessage(e,t)),r=e.onDidChangeContent(e=>{this.post(t,{type:"setContent",text:e.text,encodingLabel:(0,d.findEncoding)(e.encodingKey).label})}),o=require("../src/font-settings").watchFontFamily(s,t.webview);t.onDidDispose(()=>{i.dispose(),r.dispose(),o.dispose(),this._panels.delete(e)})',
   },
   {
+    name: "grid request without silent truncation",
+    from: 'requestGridData(e){const t=this._panels.get(e);if(!t)return Promise.resolve([]);const n=++this._requestSeq;return new Promise(e=>{this._pendingGridRequests.set(n,e),this.post(t,{type:"requestGridData",requestId:n}),setTimeout(()=>{this._pendingGridRequests.has(n)&&(this._pendingGridRequests.delete(n),e([]))},5e3)})}',
+    to: 'requestGridData(e){return require("../src/save-progress").requestGridData(this,e,s)}',
+  },
+  {
+    name: "delta undo registration",
+    from: 'case"edit":this.registerEdit(e,t.label,t.snapshot,t.prevSnapshot);break;',
+    to: 'case"edit":this.registerEdit(e,t.label,t.undo,t.redo);break;',
+  },
+  {
+    name: "delta undo dispatch",
+    from: 'registerEdit(e,t,n,i){const r=this._panels.get(e);this._onDidChangeCustomDocument.fire({document:e,label:t,undo:()=>{r&&this.post(r,{type:"applySnapshot",grid:i})},redo:()=>{r&&this.post(r,{type:"applySnapshot",grid:n})}})}',
+    to: 'registerEdit(e,t,n,i){const r=this._panels.get(e);this._onDidChangeCustomDocument.fire({document:e,label:t,undo:()=>{r&&this.post(r,{type:"applyEdit",op:n})},redo:()=>{r&&this.post(r,{type:"applyEdit",op:i})}})}',
+  },
+  {
     name: "large file save bypass",
     from: 'async saveCustomDocument(e,t){await e.save(t),await this.captureHistory(e,e.uri)}',
-    to: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);await e.save(t),await this.captureHistory(e,e.uri)}',
+    to: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{await e.save(t),await this.captureHistory(e,e.uri)})}',
+    already: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{await e.save(t),await this.captureHistory(e,e.uri)})}',
   },
   {
     name: "large file save-as bypass",
     from: 'async saveCustomDocumentAs(e,t,n){await e.saveAs(t,n),await this.captureHistory(e,t)}',
-    to: 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);await e.saveAs(t,n),await this.captureHistory(e,t)}',
+    to: 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);return require("../src/save-progress").withSaveProgress(s,t,async()=>{await e.saveAs(t,n),await this.captureHistory(e,t)})}',
+    already: 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);return require("../src/save-progress").withSaveProgress(s,t,async()=>{await e.saveAs(t,n),await this.captureHistory(e,t)})}',
   },
 ];
 

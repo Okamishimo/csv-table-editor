@@ -42,10 +42,12 @@ function decoratedGridHtml() {
   }
 
   const raw = bundleModule.exports.__testRequire(598).getWebviewHtml({}, {});
-  return gridVirtualization.decorateWebviewHtml(
-    require("../src/grid-performance").decorateWebviewHtml(
-      require("../src/search-scope").decorateWebviewHtml(
-        require("../src/font-settings").decorateWebviewHtml(raw)
+  return require("../src/edit-history").decorateWebviewHtml(
+    gridVirtualization.decorateWebviewHtml(
+      require("../src/grid-performance").decorateWebviewHtml(
+        require("../src/search-scope").decorateWebviewHtml(
+          require("../src/font-settings").decorateWebviewHtml(raw)
+        )
       )
     )
   );
@@ -290,8 +292,10 @@ test("an edit in progress is committed when scrolling evicts its row", () => {
   const edits = postedMessages.slice(before).filter((message) => message.type === "edit");
   assert.equal(edits.length, 1, "the pending edit is committed, not lost");
   assert.equal(edits[0].label, "Edit cell B6");
-  assert.equal(edits[0].snapshot[5][1], "edited");
-  assert.equal(edits[0].prevSnapshot[5][1], "name5");
+  // The ops come from the JSDOM realm, so compare them as plain data.
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(edits[0].redo), { k: "cell", r: 5, c: 1, v: "edited" });
+  assert.deepEqual(plain(edits[0].undo), { k: "cell", r: 5, c: 1, v: "name5" });
 });
 
 test("an edited cell that stays in the window keeps focus and is not committed twice", () => {

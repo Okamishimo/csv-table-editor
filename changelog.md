@@ -26,6 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Saving no longer truncates the file when the grid is slow to answer. The save
+  used to give up after five seconds and write an empty grid, which serializes
+  to an empty file; the same happened when the panel could not be found. A save
+  now waits, and fails without touching the file if the grid cannot be read.
+- A save that takes longer than a moment reports itself in the status bar.
+
+### Changed
+
+- Undo and redo carry the change instead of two copies of the whole grid.
+  Editing one cell of a 14 MiB CSV took about 180 ms and permanently retained
+  3.2 million strings in the undo stack; it now takes well under a millisecond
+  and retains two values. Deleting a row carries that row, deleting a column
+  carries that column, and only a history rollback still travels whole.
+
+### Fixed
+
 - Read-only paging preserves the visible row's actual screen position when
   inserting or removing cached pages, including short final pages. Loading no
   longer scrolls back to a search match or requests another page by itself.

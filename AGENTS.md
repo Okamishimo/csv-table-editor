@@ -42,8 +42,11 @@ into the original runtime by `scripts/patch-distribution.js`.
   search behavior.
 - `src/grid-performance.js`: Performance decorator applied after the font and
   search decorators.
-- `src/grid-virtualization.js`: Row virtualization for the editable grid,
-  applied last in the decorator chain.
+- `src/grid-virtualization.js`: Row virtualization for the editable grid.
+- `src/edit-history.js`: Delta-based undo/redo for the editable grid, applied
+  last in the decorator chain.
+- `src/save-progress.js`: Grid requests that never answer a save with nothing,
+  and status-bar reporting for a save slow enough to notice.
 - `src/private-updater.js`: Commands, authentication, persistent check timing,
   cross-window locking, installation coordination, and reload prompts.
 - `src/github-release-client.js`: Authenticated GitHub API access and bounded
@@ -83,12 +86,14 @@ into the original runtime by `scripts/patch-distribution.js`.
      -> search-scope
      -> grid-performance
      -> grid-virtualization
+     -> edit-history
    ```
 
    Every decorator after the first intentionally patches HTML already produced
-   by the ones before it. `grid-virtualization.js` runs last because it
-   rewrites the render, search and match-navigation paths that
-   `grid-performance.js` installs.
+   by the ones before it. `grid-virtualization.js` rewrites the render, search
+   and match-navigation paths that `grid-performance.js` installs, and
+   `edit-history.js` runs last because it rewrites the edit commit that
+   `grid-virtualization.js` adds as well as the original ones.
 6. Respect the Webview content security policy. Do not add inline event-handler
    attributes or unapproved scripts/styles. Prefer the existing nonce-bearing
    script and stylesheet, event delegation, CSS classes, or validated
@@ -190,6 +195,26 @@ Large-file protections are correctness requirements, not optional tuning.
 - When adding fields to preview rows, consider the worst case of 500 rows by
   100 columns before adding per-cell listeners, attributes, titles, or stored
   objects. Prefer event delegation and lazy work.
+
+## Saving and Undo
+
+Saving the editable grid reads the data from the Webview, because the Webview
+holds it. These are correctness requirements:
+
+- A save must never write anything other than the document's contents. A grid
+  request that cannot be answered fails; it must not resolve with an empty grid,
+  which serializes to an empty string and truncates the user's file. This
+  applies to a closed panel and to a timeout alike.
+- A save may take as long as it needs. Do not reintroduce a short deadline to
+  keep the editor responsive; report the wait instead. A save slow enough to
+  notice reports itself in the status bar, and the indicator follows the work so
+  it clears on failure as well as success.
+- Undo and redo carry the change, not the document. VS Code retains the undo and
+  redo closures of every edit for the life of the document, so a whole-grid
+  payload is retained once per keystroke. Only a history rollback, which really
+  does replace everything, travels whole.
+- An operation carries `headerRow` or the sort state only when it changes them,
+  so undoing a cell edit does not disturb a sort applied afterwards.
 
 ## Encoding Behavior
 
