@@ -71,6 +71,15 @@ test("patched distribution uses the enhanced detector", () => {
 
   assert.equal(encoding.detectEncoding(big5), "big5");
   assert.equal(encoding.detectEncoding(shiftJis), "shiftjis");
+
+  // The hook hands the file's bytes to the detector rather than duplicating
+  // them, so it has to accept the offset views readFile can produce.
+  const padded = Buffer.concat([Buffer.from("pad!"), shiftJis]);
+  const view = new Uint8Array(padded.buffer, padded.byteOffset + 4, shiftJis.length);
+  assert.equal(encoding.detectEncoding(view), "shiftjis");
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "..", "dist", "extension.js"), "utf8"),
+    /detectEncoding\(Buffer\.from\(e\)/,
+    "the detection hook must not copy the whole file");
   assert.equal(encoding.findEncoding("utf16le").label, "UTF-16 LE (no BOM)");
   assert.equal(encoding.findEncoding("utf16be-bom").label, "UTF-16 BE with BOM");
 });

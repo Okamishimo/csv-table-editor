@@ -42,6 +42,8 @@ into the original runtime by `scripts/patch-distribution.js`.
   search behavior.
 - `src/grid-performance.js`: Performance decorator applied after the font and
   search decorators.
+- `src/grid-virtualization.js`: Row virtualization for the editable grid,
+  applied last in the decorator chain.
 - `src/private-updater.js`: Commands, authentication, persistent check timing,
   cross-window locking, installation coordination, and reload prompts.
 - `src/github-release-client.js`: Authenticated GitHub API access and bounded
@@ -80,10 +82,13 @@ into the original runtime by `scripts/patch-distribution.js`.
      -> font-settings
      -> search-scope
      -> grid-performance
+     -> grid-virtualization
    ```
 
-   `grid-performance.js` intentionally patches HTML already produced by the
-   other two decorators.
+   Every decorator after the first intentionally patches HTML already produced
+   by the ones before it. `grid-virtualization.js` runs last because it
+   rewrites the render, search and match-navigation paths that
+   `grid-performance.js` installs.
 6. Respect the Webview content security policy. Do not add inline event-handler
    attributes or unapproved scripts/styles. Prefer the existing nonce-bearing
    script and stylesheet, event delegation, CSS classes, or validated
@@ -160,6 +165,25 @@ Large-file protections are correctness requirements, not optional tuning.
   events. Refresh search highlights during paging without scrolling to a match.
 - Automatic loading must be triggered by real user scrolling. Rendering,
   searching, or filtering must not start an uncontrolled page-request chain.
+- The editable grid renders only the rows near the viewport, with two spacer
+  rows standing in for the rest so the scrollbar keeps measuring the whole
+  file. Measure the row height instead of assuming it, and render every row
+  when the viewport cannot be measured rather than guessing.
+- Rebuilding the rendered window must not lose an edit in progress. Commit the
+  focused cell first: removing a focused element does not reliably fire
+  `focusout`, so the edit would otherwise reach neither the undo stack nor the
+  saved file.
+- Match highlighting must cost the rendered window rather than the number of
+  matches. Preserve the per-row match index; a common word matches hundreds of
+  thousands of cells.
+- Keep browser scroll anchoring disabled on the editable scroller, as on the
+  preview scroller. It would otherwise compensate for the rows the window swaps
+  and fight the spacer arithmetic.
+- Pin the editable grid's column widths from the first measured window and
+  reapply them whenever the head is rebuilt. Automatic table layout sizes
+  columns from the rows it can see, so an unpinned virtual table resizes itself
+  as the reader scrolls. Re-measure when the column count changes or a new file
+  is loaded, and leave the layout automatic when nothing can be measured.
 - Avoid whole-table DOM scans on selection and match navigation. Preserve the
   indexed lookup, tracked highlight collections, debounced search, and bounded
   large-preview DOM.
@@ -175,6 +199,13 @@ Detection order is intentional:
 2. BOM-less UTF-16 heuristics.
 3. Strict UTF-8 validation.
 4. Scored legacy encodings.
+
+Only the legacy scorer samples, and it samples 256 KiB. ASCII and strict UTF-8
+validation read the whole buffer on purpose: a CSV whose leading rows are plain
+ASCII must still be classified by the bytes that follow them, or every Japanese
+export with an ASCII header would be read as UTF-8. Detection views the
+caller's bytes rather than copying them, so it must accept an offset
+`Uint8Array` as `vscode.workspace.fs.readFile` returns.
 
 Do not weaken strict UTF-8 validation or collapse BOM and non-BOM UTF-16 menu
 entries. Encoding changes in large-file mode must reset the stream and page

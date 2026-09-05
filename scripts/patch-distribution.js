@@ -19,13 +19,22 @@ const baseWebview = "(0,l.getWebviewHtml)(t.webview,this._context.extensionUri)"
 const fontOnlyWebview = `t.webview.html=require("../src/font-settings").decorateWebviewHtml(${baseWebview});`;
 const scopedSearchWebview = `t.webview.html=require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview}));`;
 const gridPerformanceWebview = `t.webview.html=require("../src/grid-performance").decorateWebviewHtml(require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview})));`;
+const gridVirtualizationWebview = `t.webview.html=require("../src/grid-virtualization").decorateWebviewHtml(require("../src/grid-performance").decorateWebviewHtml(require("../src/search-scope").decorateWebviewHtml(require("../src/font-settings").decorateWebviewHtml(${baseWebview}))));`;
 
 // Upgrade a bundle patched by an earlier version to the current decorator chain.
 if (bundle.includes(fontOnlyWebview)) {
-  bundle = bundle.replace(fontOnlyWebview, gridPerformanceWebview);
+  bundle = bundle.replace(fontOnlyWebview, gridVirtualizationWebview);
 } else if (bundle.includes(scopedSearchWebview)) {
-  bundle = bundle.replace(scopedSearchWebview, gridPerformanceWebview);
+  bundle = bundle.replace(scopedSearchWebview, gridVirtualizationWebview);
+} else if (bundle.includes(gridPerformanceWebview)) {
+  bundle = bundle.replace(gridPerformanceWebview, gridVirtualizationWebview);
 }
+
+// Upgrade a bundle patched by an earlier version: the detector now views the
+// bytes instead of copying them, so the hook must stop duplicating the file.
+const copyingDetectCall = 'require("../src/encoding-detector").detectEncoding(Buffer.from(e),s)';
+const viewingDetectCall = 'require("../src/encoding-detector").detectEncoding(e,s)';
+if (bundle.includes(copyingDetectCall)) bundle = bundle.replace(copyingDetectCall, viewingDetectCall);
 
 const replacements = [
   {
@@ -41,13 +50,13 @@ const replacements = [
   {
     name: "encoding detector export",
     from: 't.SUPPORTED_ENCODINGS=void 0,t.encodingKey=c,t.findEncoding=d,t.detectFromBom=function(e)',
-    to: 't.SUPPORTED_ENCODINGS=void 0,t.encodingKey=c,t.findEncoding=d,t.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(Buffer.from(e),s)},t.detectFromBom=function(e)',
-    already: 't.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(Buffer.from(e),s)}',
+    to: 't.SUPPORTED_ENCODINGS=void 0,t.encodingKey=c,t.findEncoding=d,t.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(e,s)},t.detectFromBom=function(e)',
+    already: 't.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(e,s)}',
   },
   {
     name: "streaming decoder export",
-    from: 't.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(Buffer.from(e),s)},t.detectFromBom=function(e)',
-    to: 't.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(Buffer.from(e),s)},t.createDecoder=function(e){return s.getDecoder(d(e).id)},t.detectFromBom=function(e)',
+    from: 't.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(e,s)},t.detectFromBom=function(e)',
+    to: 't.detectEncoding=function(e){return require("../src/encoding-detector").detectEncoding(e,s)},t.createDecoder=function(e){return s.getDecoder(d(e).id)},t.detectFromBom=function(e)',
   },
   {
     name: "UTF-16 encoding menu entries",
@@ -70,9 +79,9 @@ const replacements = [
       to: 'async resolveCustomEditor(e,t,n){if(e.isLargeFile)return require("../src/large-file-mode").resolveLargeFileEditor(e,t,s,d);this._panels.set(e,t)',
   },
   {
-    name: "editable grid font, column-scoped search and performance support",
+    name: "editable grid font, column-scoped search, performance and virtualization support",
     from: 'this._panels.set(e,t),t.webview.options={enableScripts:!0},t.webview.html=(0,l.getWebviewHtml)(t.webview,this._context.extensionUri);',
-    to: 'this._panels.set(e,t),t.webview.options={enableScripts:!0},' + gridPerformanceWebview,
+    to: 'this._panels.set(e,t),t.webview.options={enableScripts:!0},' + gridVirtualizationWebview,
   },
   {
     name: "editable grid initial font",

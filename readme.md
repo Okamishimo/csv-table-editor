@@ -12,6 +12,8 @@ diff and roll back to.
 
 - Opens CSV/TSV files in a spreadsheet-like grid — no external tools.
 - Inline cell editing; add or remove rows and columns.
+- Only the rows near the viewport are rendered, so long files scroll, sort and
+  search without the editor building a DOM for every row.
 - Full undo/redo through the standard `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`.
 
 ### Pick your encoding
@@ -229,11 +231,10 @@ Authentication and installation references:
   differences (quoting style) may show as changes.
 - History is keyed by file path — renaming or moving a file starts a fresh
   history.
-- The editable grid renders every row at once. Search, sorting and cell
-  selection stay fast on large tables, but opening a file with hundreds of
-  thousands of rows is still slow because the whole table is built as DOM.
-  Lower `csvTableEditor.maxFileSizeMB` to send such files to the streaming
-  preview instead.
+- The editable grid keeps only the rows near the viewport in the DOM, so very
+  wide files (hundreds of columns) are now the practical limit rather than very
+  long ones. Every row still lives in memory, so `csvTableEditor.maxFileSizeMB`
+  continues to govern how large a file may be edited rather than previewed.
 
 ## License
 

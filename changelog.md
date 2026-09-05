@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The editable grid renders only the rows near the viewport instead of building
+  a DOM for the whole file. A 14 MiB CSV used to produce a 194 MiB HTML string
+  and about 3.6 million elements on every open, sort and structural edit; it now
+  holds a few dozen rows at a time, with spacer rows preserving the scrollbar.
+  Search still counts every match but paints only the rows on screen, and
+  stepping to a match scrolls to it. Column widths are measured once and pinned
+  so scrolling cannot resize the table, and an edit in progress is committed
+  before its row can be swapped out.
+- Encoding detection reads the file in place instead of copying it twice, and
+  scans for ASCII by index rather than through the iterator protocol. Detecting
+  a 64 MiB ASCII CSV takes about 55 ms instead of about 370 ms and allocates no
+  duplicate buffers. Detection results are unchanged: ASCII and strict UTF-8
+  validation still read every byte.
+
 ### Fixed
 
 - Read-only paging preserves the visible row's actual screen position when

@@ -7,6 +7,7 @@ const {
   detectEncoding,
   detectUtf16WithoutBom,
   isValidUtf8,
+  toBuffer,
 } = require("../src/encoding-detector");
 
 const CSV_SAMPLES = {
@@ -58,6 +59,32 @@ for (const [encoding, text] of Object.entries(CSV_SAMPLES)) {
     assert.equal(detectEncoding(bytes, iconv), encoding);
   });
 }
+
+test("ASCII and UTF-8 validation read past the legacy-scoring sample window", () => {
+  // Only the legacy scorer samples. A CSV whose first 256 KiB is plain ASCII
+  // must still be classified by the bytes after it, or every Japanese export
+  // with an ASCII header and ASCII leading rows would be read as UTF-8.
+  const prefix = Buffer.from("id,name,city\n" + "1,Alice,Tokyo\n".repeat(40000), "ascii");
+  assert.ok(prefix.length > 512 * 1024, "the prefix must exceed any sample window");
+  const bytes = Buffer.concat([prefix, iconv.encode("2,山田太郎,東京都\n".repeat(200), "shiftjis")]);
+  assert.notEqual(detectEncoding(bytes, iconv), "utf8");
+  assert.equal(detectEncoding(prefix, iconv), "utf8", "the prefix alone is ASCII");
+});
+
+test("reads array views in place instead of copying the file", () => {
+  const bytes = iconv.encode(CSV_SAMPLES.shiftjis, "shiftjis");
+  assert.equal(toBuffer(bytes), bytes, "an existing Buffer is used as-is");
+
+  // vscode.workspace.fs.readFile hands over a Uint8Array, which may sit at an
+  // offset inside a larger ArrayBuffer.
+  const padded = Buffer.concat([Buffer.from("pad!"), bytes]);
+  const view = new Uint8Array(padded.buffer, padded.byteOffset + 4, bytes.length);
+  const wrapped = toBuffer(view);
+  assert.equal(wrapped.buffer, view.buffer, "the view must share the caller's memory");
+  assert.equal(wrapped.byteOffset, view.byteOffset);
+  assert.equal(wrapped.length, view.length);
+  assert.equal(detectEncoding(view, iconv), "shiftjis");
+});
 
 test("distinguishes short Kanji-only EUC-JP from EUC-KR", () => {
   const bytes = iconv.encode("氏名,住所\n山田太郎,東京都\n", "eucjp");

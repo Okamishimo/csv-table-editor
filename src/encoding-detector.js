@@ -22,12 +22,27 @@ const SIMPLIFIED_COMMON = new Set(
 const TRADITIONAL_COMMON = new Set(
   "的一是在不了有和人這中大為上個國我以要他時來用們生到作地於出就分對成會可主發年動同工能下過子說產種面而方後多定行學法所民得經進著等部度家電力裡如水化高自理起小物現實加量都兩體制機當使點從業本去把性好應開合還因由其些然前外天政日社義事平形相全表間樣與關各重新線內數正心明看原利比或但質氣第向道命變條結解問意建月公系軍情者最立代想已通並提直題程展果料象員位入常文總次品式活設及管特件長求老頭基資邊流路級少圖山統接知較將組見計別手角期根論運農指區強放決西被幹做必戰先回則任取據處理世車價教務編碼檔案欄位資料測試總計名稱城市電話聯絡臺灣"
 );
+const SMART_PUNCTUATION = new Set("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ");
+const VIETNAMESE_MARKERS = new Set("ĂăÂâĐđÊêÔôƠơƯư₫");
 const KOREAN_COMMON = new Set(
   "가나다라마바사아자차카타파하의이그저것수있없되한사람우리때년월일시분초이름주소전화번호회사상품가격수량합계비고서울부산한국대한민국자료데이터파일인코딩테스트고객주문판매구매총계담당도시"
 );
 
+/**
+ * Views the bytes as a Buffer without copying them. Detection only ever reads,
+ * and `Buffer.from` would duplicate the whole file: for a 64 MiB CSV that is
+ * 64 MiB of allocation and memcpy per call, on the extension host's only thread.
+ */
+function toBuffer(input) {
+  if (Buffer.isBuffer(input)) return input;
+  if (ArrayBuffer.isView(input)) {
+    return Buffer.from(input.buffer, input.byteOffset, input.byteLength);
+  }
+  return Buffer.from(input);
+}
+
 function detectEncoding(input, codec) {
-  const bytes = Buffer.from(input);
+  const bytes = toBuffer(input);
   const bom = detectBom(bytes);
   if (bom) return bom;
   if (bytes.length === 0 || isAscii(bytes)) return "utf8";
@@ -50,7 +65,10 @@ function detectBom(bytes) {
 }
 
 function isAscii(bytes) {
-  for (const byte of bytes) {
+  // Indexed, not `for...of`: this scans every byte of the file, and the
+  // iterator protocol costs about nine times as much for the same answer.
+  for (let index = 0; index < bytes.length; index++) {
+    const byte = bytes[index];
     if (byte >= 0x80 || byte === 0) return false;
   }
   return true;
@@ -134,7 +152,9 @@ function isContinuation(byte) {
 }
 
 function rankLegacyEncodings(input, codec) {
-  const bytes = sampleBytes(Buffer.from(input));
+  // Sample first: only the sample is ever decoded, so copying the whole file
+  // here would allocate megabytes to immediately discard 99% of them.
+  const bytes = sampleBytes(toBuffer(input));
   return LEGACY_ENCODINGS
     .map((encoding) => scoreCandidate(bytes, encoding, codec))
     .sort((left, right) => right.score - left.score);
@@ -223,7 +243,7 @@ function analyzeText(text) {
     if (SIMPLIFIED_COMMON.has(character)) stats.simplifiedCommon++;
     if (TRADITIONAL_COMMON.has(character)) stats.traditionalCommon++;
     if (KOREAN_COMMON.has(character)) stats.koreanCommon++;
-    if ("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ".includes(character)) stats.smartPunctuation++;
+    if (SMART_PUNCTUATION.has(character)) stats.smartPunctuation++;
   }
   return stats;
 }
@@ -254,7 +274,7 @@ function isLatin(codePoint) {
 }
 
 function isVietnamese(character, codePoint) {
-  if ("ĂăÂâĐđÊêÔôƠơƯư₫".includes(character)) return true;
+  if (VIETNAMESE_MARKERS.has(character)) return true;
   if (codePoint >= 0x1ea0 && codePoint <= 0x1ef9) return true;
   return codePoint === 0x0300 || codePoint === 0x0301 || codePoint === 0x0303 ||
     codePoint === 0x0309 || codePoint === 0x0323;
@@ -335,7 +355,9 @@ function countDelimiter(line, delimiter) {
 function analyzeByteSequences(bytes, encoding) {
   if (encoding === "windows1252" || encoding === "windows1258" || encoding === "latin1") {
     let highBytes = 0;
-    for (const byte of bytes) if (byte >= 0x80) highBytes++;
+    for (let index = 0; index < bytes.length; index++) {
+      if (bytes[index] >= 0x80) highBytes++;
+    }
     return { highBytes, validHighBytes: highBytes, multibyteUnits: 0 };
   }
 
@@ -421,6 +443,7 @@ function byteMismatchRate(left, right) {
 
 module.exports = {
   detectEncoding,
+  toBuffer,
   detectBom,
   detectUtf16WithoutBom,
   isValidUtf8,
