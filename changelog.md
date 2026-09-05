@@ -8,72 +8,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- The large-file preview's page cache is bounded and held in memory instead of
-  growing without limit in a temporary file. Searching a 22 MiB CSV used to
-  leave about 31 MiB of JSON in the temporary directory, and a host crash left
-  it behind; the cache now holds at most 8 MiB, and a page it has dropped is
-  read again from its offset in about a millisecond. Scrolling back further
-  than the cache reaches now works instead of stopping.
+## [0.0.13] - 2026-09-05
 
 ### Added
 
-- The large-file preview now counts the file's rows in the background and shows
-  the rest of the file as placeholder space, so the scrollbar spans the whole
-  file instead of the few hundred loaded rows. The thumb finally says how much
-  is left, the status line reads `Rows 4,902–5,401 of 12,480,913`, and dragging
-  the scrollbar anywhere loads that part of the file directly rather than paging
-  towards it.
-- While a whole-file search runs, the preview follows the scan so you can see
-  how far it has reached. It hands control back as soon as you scroll, a match
-  is found, or the scan finishes.
-
-- The large-file preview now searches the whole file instead of only the rows
-  it has loaded. The host streams the file and reports matches as it finds
-  them, beginning at the row on screen and wrapping at the end of the file, so
-  results appear while the rest is still being read. Enter and Shift+Enter move
-  between matches anywhere in the file, loading the page that holds one when it
-  is outside the current window, and the counter reports progress while the
-  scan runs.
-
-### Changed
-
-- The editable grid renders only the rows near the viewport instead of building
-  a DOM for the whole file. A 14 MiB CSV used to produce a 194 MiB HTML string
-  and about 3.6 million elements on every open, sort and structural edit; it now
-  holds a few dozen rows at a time, with spacer rows preserving the scrollbar.
-  Search still counts every match but paints only the rows on screen, and
-  stepping to a match scrolls to it. Column widths are measured once and pinned
-  so scrolling cannot resize the table, and an edit in progress is committed
-  before its row can be swapped out.
-- Encoding detection reads the file in place instead of copying it twice, and
-  scans for ASCII by index rather than through the iterator protocol. Detecting
-  a 64 MiB ASCII CSV takes about 55 ms instead of about 370 ms and allocates no
-  duplicate buffers. Detection results are unchanged: ASCII and strict UTF-8
-  validation still read every byte.
+- The large-file preview searches the whole file instead of only the rows it has
+  loaded. The host streams the file and reports matches as it finds them,
+  beginning at the row on screen and wrapping at the end, so results appear while
+  the rest is still being read. Enter and Shift+Enter move between matches
+  anywhere in the file, loading the page that holds one when it is outside the
+  current window, and the counter reports progress while the scan runs.
+- The preview counts the file's rows in the background and shows the rest of the
+  file as placeholder space, so the scrollbar spans the whole file instead of the
+  few hundred loaded rows. The thumb says how much is left, the status line reads
+  `Rows 4,902-5,401 of 12,480,913`, and dragging the scrollbar anywhere loads that
+  part of the file directly rather than paging towards it.
+- While a whole-file search runs, the preview follows the scan so you can see how
+  far it has reached. It hands control back as soon as you scroll, a match is
+  found, or the scan finishes.
 
 ### Fixed
 
 - Saving no longer truncates the file when the grid is slow to answer. The save
-  used to give up after five seconds and write an empty grid, which serializes
-  to an empty file; the same happened when the panel could not be found. A save
-  now waits, and fails without touching the file if the grid cannot be read.
-- A save that takes longer than a moment reports itself in the status bar.
-
-### Changed
-
-- Undo and redo carry the change instead of two copies of the whole grid.
-  Editing one cell of a 14 MiB CSV took about 180 ms and permanently retained
-  3.2 million strings in the undo stack; it now takes well under a millisecond
-  and retains two values. Deleting a row carries that row, deleting a column
-  carries that column, and only a history rollback still travels whole.
-
-### Fixed
-
+  used to give up after five seconds and write an empty grid, which serializes to
+  an empty file; the same happened when the panel could not be found. A save now
+  waits as long as it needs, and fails without touching the file if the grid
+  cannot be read. A save that takes longer than a moment reports itself in the
+  status bar.
 - Read-only paging preserves the visible row's actual screen position when
   inserting or removing cached pages, including short final pages. Loading no
   longer scrolls back to a search match or requests another page by itself.
+- Scrolling back further than the page cache reaches reads the page again
+  instead of stopping.
+
+### Changed
+
+- The editable grid renders only the rows near the viewport instead of building a
+  DOM for the whole file. A 14 MiB CSV used to produce a 194 MiB HTML string and
+  about 3.6 million elements on every open, sort and structural edit; it now holds
+  a few dozen rows at a time, with spacer rows preserving the scrollbar. Search
+  still counts every match but paints only the rows on screen, and stepping to a
+  match scrolls to it. Column widths are measured once and pinned so scrolling
+  cannot resize the table, and an edit in progress is committed before its row can
+  be swapped out.
+- Undo and redo carry the change instead of two copies of the whole grid. Editing
+  one cell of a 14 MiB CSV took about 180 ms and permanently retained 3.2 million
+  strings in the undo stack; it now takes well under a millisecond and retains two
+  values. Deleting a row carries that row, deleting a column carries that column,
+  and only a history rollback still travels whole.
+- Encoding detection reads the file in place instead of copying it twice, and
+  scans for ASCII by index rather than through the iterator protocol. Detecting a
+  64 MiB ASCII CSV takes about 55 ms instead of about 370 ms and allocates no
+  duplicate buffers. Detection results are unchanged: ASCII and strict UTF-8
+  validation still read every byte.
+- The preview's page cache is bounded and held in memory instead of growing
+  without limit in a temporary file. Searching a 22 MiB CSV used to leave about
+  31 MiB of JSON in the temporary directory, and a host crash left it behind; the
+  cache now holds at most 8 MiB, and a page it has dropped is read again from its
+  offset in about a millisecond.
 
 ## [0.0.12] - 2026-09-05
 
