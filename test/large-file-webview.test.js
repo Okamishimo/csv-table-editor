@@ -91,6 +91,12 @@ test("preview cell clicks highlight both axes with bounded DOM changes and one s
   assert.equal(cellColumnRule(document), undefined, "column-header clicks clear the cell axes");
   assert.equal(document.getElementById("search-scope").textContent, "Column City only");
   click(first.cells[1]);
+  assert.equal(document.querySelectorAll(".search-column").length, 0, "cell clicks cancel the previous whole-column highlight");
+  assert.equal(document.getElementById("filter").placeholder, "Find in loaded rows");
+  assert.deepEqual(Array.from(document.querySelectorAll(cellColumnRule(document).selectorText)),
+    [headers[1], first.cells[1], second.cells[1]], "only the clicked cell's column remains highlighted");
+  send({ ...page, mode: "append", pageNumber: 2, startRow: 102, endRow: 103 });
+  assert.equal(document.querySelectorAll(".search-column").length, 0, "new pages must not restore the cancelled selection");
   send(page);
   assert.equal(first.classList.contains("highlighted-row"), false);
   assert.equal(first.cells[1].classList.contains("highlighted-cell"), false);
@@ -128,7 +134,7 @@ test("preview cell axes extend to cached pages and clear when the active page is
   }
 });
 
-test("preview cell clicks preserve whole-window and column-scoped search and match navigation", async (t) => {
+test("preview cell clicks cancel column scope once and preserve whole-window search and navigation", async (t) => {
   for (const scoped of [false, true]) {
     const { window, document, send, click, postedMessages, scrolledCells } = openPreview(t);
     send({ type: "page", mode: "replace", header: ["Name", "City"],
@@ -141,25 +147,28 @@ test("preview cell clicks preserve whole-window and column-scoped search and mat
     await new Promise((resolve) => window.setTimeout(resolve, 175));
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const matches = Array.from(document.querySelectorAll("td.match"));
+    assert.equal(matches.length, scoped ? 2 : 3);
     const current = document.querySelector("td.match-current");
-    const scope = document.getElementById("search-scope").textContent;
-    const placeholder = filter.placeholder;
     const scrollBefore = scrolledCells.length;
     const rows = document.querySelector("tbody").rows;
     const tableWrap = document.getElementById("table-wrap");
     tableWrap.scrollTop = 120;
     tableWrap.scrollLeft = 40;
     click(rows[0].cells[1]);
-    click(rows[1].cells[2]); // Highlight a column other than the search scope.
+    assert.equal(document.querySelectorAll(".search-column").length, 0, "even clicking the scoped column cancels its whole-column selection");
+    const expectedCurrent = scoped ? rows[0].cells[1] : current;
+    const expectedIndex = scoped ? 1 : 2;
+    click(rows[1].cells[2]); // Subsequent clicks only move the cell highlight.
+    click(rows[1].cells[2]);
     await new Promise((resolve) => window.setTimeout(resolve, 175));
-    assert.equal(document.getElementById("search-scope").textContent, scope);
-    assert.equal(filter.placeholder, placeholder);
+    assert.equal(document.getElementById("search-scope").textContent, "");
+    assert.equal(filter.placeholder, "Find in loaded rows");
     assert.equal(filter.value, "Alice");
     assert.equal(filter.disabled, false);
-    assert.deepEqual(Array.from(document.querySelectorAll("td.match")), matches);
-    assert.equal(matches.length, scoped ? 2 : 3);
-    assert.equal(document.querySelector("td.match-current"), current);
-    assert.equal(document.getElementById("filter-count").textContent, `2/${matches.length} results`);
+    assert.deepEqual(Array.from(document.querySelectorAll("td.match")),
+      [rows[0].cells[1], rows[0].cells[2], rows[1].cells[1]], "search includes matches outside the cancelled scope");
+    assert.equal(document.querySelector("td.match-current"), expectedCurrent);
+    assert.equal(document.getElementById("filter-count").textContent, `${expectedIndex}/3 results`);
     assert.equal(scrolledCells.length, scrollBefore);
     assert.equal(tableWrap.scrollTop, 120);
     assert.equal(tableWrap.scrollLeft, 40);
@@ -168,9 +177,9 @@ test("preview cell clicks preserve whole-window and column-scoped search and mat
       window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", [modifier]: true, bubbles: true }));
       assert.equal(document.activeElement, filter);
       filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
-      assert.equal(document.getElementById("filter-count").textContent, `1/${matches.length} results`);
+      assert.equal(document.getElementById("filter-count").textContent, `${scoped ? 3 : 1}/3 results`);
       filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      assert.equal(document.querySelector("td.match-current"), current);
+      assert.equal(document.querySelector("td.match-current"), expectedCurrent);
     }
     assert.deepEqual(JSON.parse(JSON.stringify(postedMessages)), [{ type: "ready" }]);
   }

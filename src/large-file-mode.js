@@ -831,20 +831,20 @@ function getLargeFileWebviewHtml() {
     currentMatchCell = null;
   }
 
-  function focusMatch() {
+  function focusMatch(scrollToMatch = true) {
     if (currentMatchCell) currentMatchCell.classList.remove('match-current');
     currentMatchCell = null;
     const cell = matches[matchIndex];
     if (!cell) return;
     cell.classList.add('match-current');
     currentMatchCell = cell;
-    if (typeof cell.scrollIntoView === 'function') {
+    if (scrollToMatch && typeof cell.scrollIntoView === 'function') {
       cell.scrollIntoView({ block: 'center', inline: 'center' });
     }
     byId('filter-count').textContent = (matchIndex + 1) + '/' + matches.length + ' results';
   }
 
-  function runSearch(keepIndex) {
+  function runSearch(keepIndex, scrollToMatch = true) {
     clearSearchHighlights();
     const needle = byId('filter').value.trim().toLocaleLowerCase();
     matches = [];
@@ -875,7 +875,7 @@ function getLargeFileWebviewHtml() {
       return;
     }
     if (!keepIndex || matchIndex < 0 || matchIndex >= matches.length) matchIndex = 0;
-    focusMatch();
+    focusMatch(scrollToMatch);
   }
 
   function stepMatch(delta) {
@@ -914,6 +914,12 @@ function getLargeFileWebviewHtml() {
 
   function highlightCell(cell) {
     if (highlightedCellElement === cell) return;
+    if (selectedSearchColumn !== null) {
+      selectedSearchColumn = null;
+      syncSelectedSearchColumn();
+      // Cancel whole-column selection without scrolling away from the click.
+      runSearch(false, false);
+    }
     highlightRow(cell.parentElement);
     highlightedCellElement = cell;
     cell.classList.add('highlighted-cell');

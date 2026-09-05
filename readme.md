@@ -45,8 +45,9 @@ reopen or save with any of these via the clickable encoding label:
   mode, clicking an unselected column's title or sort arrow selects it first;
   subsequent clicks sort it while keeping the column selected.
 - Excel-style row and column highlighting for the selected cell, including
-  clicked cells in the read-only preview. Preview cell clicks preserve the
-  existing search scope, results, and match position.
+  clicked cells in the read-only preview. Preview cell clicks cancel any prior
+  whole-column selection and restore search across all loaded rows, leaving
+  only the clicked cell's row and column highlighted.
 
 ### History and diff
 

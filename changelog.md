@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-09-05
+
+### Fixed
+
+- Clicking a cell in the read-only preview cancels the previous whole-column
+  selection and restores whole-window search, preventing two columns from
+  remaining highlighted. The view stays at the clicked cell.
+
 ## [0.0.11] - 2026-09-05
 
 ### Fixed

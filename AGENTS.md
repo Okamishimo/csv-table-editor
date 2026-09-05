@@ -106,8 +106,11 @@ highlighting a row. Preserve the editable grid's existing selection/search
 behavior. Keep preview row highlighting delegated and apply a class to the row
 as a unit, without per-cell listeners or classes.
 
-Clicking a data cell in the preview highlights both its row and column without
-changing search scope. Track only the active cell and row, and paint the column
+Clicking a data cell in the preview cancels any whole-column selection and
+restores search across the loaded window without scrolling away from the click.
+Only the clicked cell's row and column stay highlighted. Subsequent cell clicks
+without a whole-column selection must not rescan or reset match navigation.
+Track only the active cell and row, and paint the column
 with one reusable rule in the nonce-approved stylesheet. Clear the active cell
 and column highlights when their row leaves the loaded window or a row/column
 header is clicked; row-number clicks still highlight the requested whole row.
