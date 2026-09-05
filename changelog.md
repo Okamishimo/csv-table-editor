@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The large-file preview's page cache is bounded and held in memory instead of
+  growing without limit in a temporary file. Searching a 22 MiB CSV used to
+  leave about 31 MiB of JSON in the temporary directory, and a host crash left
+  it behind; the cache now holds at most 8 MiB, and a page it has dropped is
+  read again from its offset in about a millisecond. Scrolling back further
+  than the cache reaches now works instead of stopping.
+
 ### Added
 
 - The large-file preview now counts the file's rows in the background and shows

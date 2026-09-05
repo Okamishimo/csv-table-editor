@@ -2,8 +2,6 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
 const {
   HARD_MAX_FILE_SIZE_MB,
   clampLimit,
@@ -31,6 +29,14 @@ const SEARCH_MATCH_LIMIT = 20000;
 const SEARCH_REPORT_ROWS = 4000;
 /** How often a running scan shows the reader the page it is looking at. */
 const SCAN_FOLLOW_INTERVAL_MS = 200;
+/**
+ * How much of the file's pages to keep. Once the file has been indexed any page
+ * can be re-read from its offset, so the cache is only there to make the pages
+ * near the reader free. Both limits are needed: pages are usually small, but a
+ * preview row may hold 32,768 characters.
+ */
+const PAGE_CACHE_MAX_BYTES = 8 * MIB;
+const PAGE_CACHE_MAX_PAGES = 512;
 
 async function createLargeDocumentIfNeeded(uri, openContext, vscode, encodingApi) {
   if (!uri || uri.scheme === "untitled") return null;
@@ -224,10 +230,10 @@ class CsvStreamPager {
     this.header = null;
     this.pageNumber = 0;
     this.rowsSeen = 0;
-    this.cacheHandle = null;
-    this.cachePath = null;
-    this.cacheOffset = 0;
-    this.cacheEntries = new Map();
+    /** Recently read pages, oldest first: a Map iterates in insertion order,
+     *  so re-inserting on a hit is all the recency tracking this needs. */
+    this.pageCache = new Map();
+    this.pageCacheBytes = 0;
     /** Page offsets, once the file has been indexed. */
     this.index = null;
   }
@@ -242,19 +248,14 @@ class CsvStreamPager {
     this.header = null;
     this.pageNumber = 0;
     this.rowsSeen = 0;
-    this.cachePath = path.join(
-      os.tmpdir(),
-      `csv-table-editor-${crypto.randomUUID()}.pages`
-    );
-    this.cacheHandle = await fs.promises.open(this.cachePath, "w+");
-    this.cacheOffset = 0;
-    this.cacheEntries = new Map();
+    this.pageCache = new Map();
+    this.pageCacheBytes = 0;
   }
 
   async nextPage(afterPage = this.pageNumber) {
     if (!this.iterator) await this.reset();
     const targetPage = Number.isInteger(afterPage) ? afterPage + 1 : this.pageNumber + 1;
-    if (targetPage <= this.pageNumber) return this.readCachedPage(targetPage);
+    if (targetPage <= this.pageNumber) return this.pageAt(targetPage);
     if (targetPage !== this.pageNumber + 1) return null;
 
     let rows;
@@ -283,14 +284,15 @@ class CsvStreamPager {
       truncatedCells: this.parser.truncatedCells,
       truncatedColumns: this.parser.truncatedColumns,
     };
-    await this.cachePage(page);
+    this.cachePage(page);
     return page;
   }
 
   async previousPage(beforePage) {
     const targetPage = Number(beforePage) - 1;
     if (!Number.isInteger(targetPage) || targetPage < 1) return null;
-    return this.readCachedPage(targetPage);
+    // Scrolling back past the cache is a seek, not a dead end.
+    return this.pageAt(targetPage);
   }
 
   /**
@@ -300,7 +302,7 @@ class CsvStreamPager {
    */
   async pageAt(pageNumber) {
     if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
-    const cached = await this.readCachedPage(pageNumber);
+    const cached = this.readCachedPage(pageNumber);
     if (cached) return cached;
     if (pageNumber === this.pageNumber + 1) return this.nextPage(this.pageNumber);
     return this.seekToPage(pageNumber);
@@ -316,7 +318,7 @@ class CsvStreamPager {
     if (this.header === null) {
       const first = await this.nextPage(0);
       if (pageNumber === 1) return first;
-      const cached = await this.readCachedPage(pageNumber);
+      const cached = this.readCachedPage(pageNumber);
       if (cached) return cached;
     }
 
@@ -334,30 +336,36 @@ class CsvStreamPager {
     return this.nextPage(this.pageNumber);
   }
 
-  async cachePage(page) {
-    if (this.cacheEntries.has(page.pageNumber)) return;
-    if (!this.cacheHandle) throw new Error("Large-file page cache is unavailable.");
-    const encoded = Buffer.from(JSON.stringify(page), "utf8");
-    const offset = this.cacheOffset;
-    await this.cacheHandle.write(encoded, 0, encoded.length, offset);
-    this.cacheEntries.set(page.pageNumber, { offset, length: encoded.length });
-    this.cacheOffset += encoded.length;
+  cachePage(page) {
+    if (this.pageCache.has(page.pageNumber)) return;
+    // The header array is shared by every page and grows as wider rows appear,
+    // so a cached page keeps the one it was built with.
+    const entry = { page: { ...page, header: page.header.slice() }, bytes: pageBytes(page) };
+    this.pageCache.set(page.pageNumber, entry);
+    this.pageCacheBytes += entry.bytes;
+    this.trimPageCache();
   }
 
-  async readCachedPage(pageNumber) {
-    const entry = this.cacheEntries.get(pageNumber);
-    if (!entry || !this.cacheHandle) return null;
-    const encoded = Buffer.allocUnsafe(entry.length);
-    const { bytesRead } = await this.cacheHandle.read(
-      encoded,
-      0,
-      encoded.length,
-      entry.offset
-    );
-    if (bytesRead !== encoded.length) {
-      throw new Error(`Could not restore cached CSV preview page ${pageNumber}.`);
+  /** Drop the least recently used pages until the cache is within its limits. */
+  trimPageCache() {
+    while (
+      this.pageCache.size > PAGE_CACHE_MAX_PAGES ||
+      (this.pageCacheBytes > PAGE_CACHE_MAX_BYTES && this.pageCache.size > 1)
+    ) {
+      const oldest = this.pageCache.keys().next();
+      if (oldest.done) return;
+      this.pageCacheBytes -= this.pageCache.get(oldest.value).bytes;
+      this.pageCache.delete(oldest.value);
     }
-    return JSON.parse(encoded.toString("utf8"));
+  }
+
+  readCachedPage(pageNumber) {
+    const entry = this.pageCache.get(pageNumber);
+    if (!entry) return null;
+    // Re-inserting moves it to the end, which is the most recently used.
+    this.pageCache.delete(pageNumber);
+    this.pageCache.set(pageNumber, entry);
+    return entry.page;
   }
 
   async takeRows(count) {
@@ -386,20 +394,19 @@ class CsvStreamPager {
     if (this.stream) this.stream.destroy();
     this.stream = null;
     this.iterator = null;
-    const cacheHandle = this.cacheHandle;
-    const cachePath = this.cachePath;
-    this.cacheHandle = null;
-    this.cachePath = null;
-    this.cacheEntries = new Map();
-    if (cacheHandle) await cacheHandle.close();
-    if (cachePath) {
-      try {
-        await fs.promises.unlink(cachePath);
-      } catch (error) {
-        if (!error || error.code !== "ENOENT") throw error;
-      }
-    }
+    this.pageCache = new Map();
+    this.pageCacheBytes = 0;
   }
+}
+
+/** Roughly what a page costs to keep, in bytes of UTF-16 string data. */
+function pageBytes(page) {
+  let bytes = 128;
+  for (const row of page.rows) {
+    bytes += 32;
+    for (const value of row) bytes += value.length * 2 + 16;
+  }
+  return bytes;
 }
 
 class StreamingCsvParser {
@@ -1594,6 +1601,8 @@ function getLargeFileWebviewHtml() {
 }
 
 module.exports = {
+  PAGE_CACHE_MAX_BYTES,
+  PAGE_CACHE_MAX_PAGES,
   SEARCH_MATCH_LIMIT,
   searchLargeFile,
   LargeCsvDocument,

@@ -89,9 +89,9 @@ test("stream pager keeps only a bounded page and retains the header", async () =
     assert.equal(last.startRow, 1_202);
     assert.equal(last.done, true);
     assert.equal(last.endRow, 1_206);
-    const cachePath = pager.cachePath;
+    assert.ok(pager.pageCache.size > 0, "pages are cached while the pager is open");
     await pager.close();
-    assert.equal(fs.existsSync(cachePath), false);
+    assert.equal(pager.pageCache.size, 0, "closing releases every cached page");
   } finally {
     await fs.promises.rm(temporaryDirectory, { recursive: true, force: true });
   }

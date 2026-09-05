@@ -234,8 +234,94 @@ test("a seek does not cache the same page twice", async (t) => {
   pager.index = await buildFileIndex(filePath, "utf8", 100);
 
   await pager.pageAt(4);
-  const afterFirstSeek = pager.cacheOffset;
+  const cachedAfterSeek = pager.pageCache.size;
+  const bytesAfterSeek = pager.pageCacheBytes;
   await pager.pageAt(4);
   await pager.pageAt(1);
-  assert.equal(pager.cacheOffset, afterFirstSeek, "re-reading a cached page writes nothing new");
+  assert.equal(pager.pageCache.size, cachedAfterSeek, "re-reading a cached page stores nothing new");
+  assert.equal(pager.pageCacheBytes, bytesAfterSeek);
+});
+
+test("the page cache stays bounded and an evicted page is still reachable", async (t) => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-table-editor-cache-"));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, "wide.csv");
+  // Fat rows, so the byte limit bites long before the page limit.
+  const padding = "x".repeat(2000);
+  const lines = ["id,name"];
+  for (let index = 1; index <= 40000; index++) lines.push(`${index},${padding}${index}`);
+  await fs.promises.writeFile(filePath, lines.join("\n"));
+
+  const { buildFileIndex } = require("../src/large-file-index");
+  const { PAGE_CACHE_MAX_BYTES, PAGE_CACHE_MAX_PAGES } = require("../src/large-file-mode");
+  const pager = new CsvStreamPager(filePath, "utf8", ",", encodingApi);
+  t.after(() => pager.close());
+  await pager.nextPage();
+  pager.index = await buildFileIndex(filePath, "utf8", 100);
+
+  // Read the whole file the way a search does.
+  const document = { pageAt: (pageNumber) => pager.pageAt(pageNumber) };
+  await scan(document, { query: "nothing-matches", column: -1, fromRow: 0 });
+
+  assert.equal(pager.pageNumber, 400, "the scan reached the end");
+  assert.ok(pager.pageCache.size < 400, `the cache is bounded, holds ${pager.pageCache.size} of 400 pages`);
+  assert.ok(pager.pageCache.size <= PAGE_CACHE_MAX_PAGES);
+  assert.ok(pager.pageCacheBytes <= PAGE_CACHE_MAX_BYTES + 1,
+    `cache holds ${pager.pageCacheBytes} bytes, limit ${PAGE_CACHE_MAX_BYTES}`);
+  assert.equal(pager.pageCache.has(1), false, "the first page was dropped long ago");
+
+  // Dropped is not lost: the index makes it readable again.
+  const first = await pager.pageAt(1);
+  assert.ok(first, "an evicted page comes back from the file");
+  assert.equal(first.startRow, 2);
+  assert.deepEqual(first.rows[0], ["1", `${padding}1`]);
+  assert.deepEqual(first.header, ["id", "name"]);
+});
+
+test("recently read pages survive and the oldest are the ones dropped", async (t) => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-table-editor-lru-"));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, "data.csv");
+  const lines = ["id,name"];
+  for (let index = 1; index <= 100000; index++) lines.push(`${index},name ${index}`);
+  await fs.promises.writeFile(filePath, lines.join("\n"));
+
+  const { buildFileIndex } = require("../src/large-file-index");
+  const pager = new CsvStreamPager(filePath, "utf8", ",", encodingApi);
+  t.after(() => pager.close());
+  await pager.nextPage();
+  pager.index = await buildFileIndex(filePath, "utf8", 100);
+
+  // Fill past the page limit, touching page 2 as we go so it stays warm.
+  for (let page = 2; page <= 700; page++) {
+    await pager.pageAt(page);
+    if (page % 50 === 0) await pager.pageAt(2);
+  }
+  assert.ok(pager.pageCache.size <= 512);
+  assert.equal(pager.pageCache.has(2), true, "a page kept in use is kept in the cache");
+  assert.equal(pager.pageCache.has(3), false, "one never touched again is not");
+  assert.equal(pager.pageCache.has(700), true, "the newest page is there");
+});
+
+test("scrolling back past the cache reads the page again instead of giving up", async (t) => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-table-editor-back-"));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, "data.csv");
+  const lines = ["id,name"];
+  for (let index = 1; index <= 100000; index++) lines.push(`${index},name ${index}`);
+  await fs.promises.writeFile(filePath, lines.join("\n"));
+
+  const { buildFileIndex } = require("../src/large-file-index");
+  const pager = new CsvStreamPager(filePath, "utf8", ",", encodingApi);
+  t.after(() => pager.close());
+  await pager.nextPage();
+  pager.index = await buildFileIndex(filePath, "utf8", 100);
+  for (let page = 2; page <= 700; page++) await pager.pageAt(page);
+
+  assert.equal(pager.pageCache.has(2), false, "page 2 is long gone from the cache");
+  const previous = await pager.previousPage(3);
+  assert.ok(previous, "scrolling up still works");
+  assert.equal(previous.pageNumber, 2);
+  assert.equal(previous.startRow, 102);
+  assert.deepEqual(previous.rows[0], ["101", "name 101"]);
 });

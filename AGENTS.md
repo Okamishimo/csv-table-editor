@@ -164,8 +164,12 @@ Large-file protections are correctness requirements, not optional tuning.
   32,768 characters per row.
 - Keep parsing cooperative and bounded. Do not remove chunking or event-loop
   yields without equivalent protection.
-- Preserve bidirectional scrolling through cached pages. Page cache files must
-  be unique per document and removed when the document closes.
+- Preserve bidirectional scrolling. Cached pages are an optimization, not the
+  only way back: the cache is bounded in both pages and bytes, and a page that
+  has been dropped is read again from its offset. Do not make the cache
+  unbounded again, and do not put it back on disk; a full scan of a large file
+  would otherwise leave gigabytes in the temporary directory, and a crash would
+  leave them behind.
 - The preview counts the file's rows once, in the background, and records where
   every page begins. The count must agree exactly with `StreamingCsvParser`, so
   the index reads the file's own units and mirrors its quote and terminator
