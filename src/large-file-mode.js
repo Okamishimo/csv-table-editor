@@ -613,9 +613,13 @@ function getLargeFileWebviewHtml() {
   thead { position: sticky; top: 0; z-index: 2; background: var(--vscode-editorWidget-background); }
   th.row-number { position: sticky; left: 0; z-index: 1; text-align: right; color: var(--vscode-descriptionForeground); background: var(--vscode-editorWidget-background); }
   thead th.column-header { cursor: pointer; user-select: none; }
+  tbody th.row-number { cursor: pointer; user-select: none; }
   tbody tr:hover td { background: var(--vscode-list-hoverBackground); }
   th.search-column,
   td.search-column { background: var(--vscode-list-inactiveSelectionBackground); }
+  tbody tr.highlighted-row > td,
+  tbody tr.highlighted-row > th { background: var(--vscode-list-inactiveSelectionBackground); }
+  td.highlighted-cell { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
   td.match { background: var(--vscode-editor-findMatchBackground) !important; }
   td.match-current { background: var(--vscode-editor-findMatchHighlightBackground, var(--vscode-editor-findMatchBackground)) !important; outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
   #status { min-width: 130px; }
@@ -656,6 +660,9 @@ function getLargeFileWebviewHtml() {
   let autoloadFrame = 0;
   let selectedSearchColumn = null;
   let selectedColumnCells = [];
+  let highlightedRowElement = null;
+  let highlightedCellElement = null;
+  let highlightedColumnRule = null;
   let matches = [];
   let matchIndex = -1;
   let currentMatchCell = null;
@@ -742,6 +749,7 @@ function getLargeFileWebviewHtml() {
     else if (!replacing && removedHeight > 0) tableWrap.scrollTop = Math.max(0, tableWrap.scrollTop - removedHeight);
     else if (replacing) tableWrap.scrollTop = 0;
 
+    if (highlightedRowElement && !body.contains(highlightedRowElement)) clearRowHighlight();
     syncSelectedSearchColumn();
     // A page arriving while nothing is searched has no highlights to redo.
     if (matches.length || byId('filter').value.trim()) runSearch(true);
@@ -877,9 +885,48 @@ function getLargeFileWebviewHtml() {
   }
 
   function selectSearchColumn(column) {
+    clearRowHighlight();
     selectedSearchColumn = selectedSearchColumn === column ? null : column;
     syncSelectedSearchColumn();
     runSearch(false);
+  }
+
+  function clearRowHighlight() {
+    clearCellHighlight();
+    if (highlightedRowElement) highlightedRowElement.classList.remove('highlighted-row');
+    highlightedRowElement = null;
+  }
+
+  function highlightRow(row) {
+    clearCellHighlight();
+    if (highlightedRowElement === row) return;
+    clearRowHighlight();
+    highlightedRowElement = row;
+    row.classList.add('highlighted-row');
+    // Row highlighting is visual only: keep the query, scope and current match.
+  }
+
+  function clearCellHighlight() {
+    if (highlightedCellElement) highlightedCellElement.classList.remove('highlighted-cell');
+    highlightedCellElement = null;
+    if (highlightedColumnRule) highlightedColumnRule.selectorText = ':not(*)';
+  }
+
+  function highlightCell(cell) {
+    if (highlightedCellElement === cell) return;
+    highlightRow(cell.parentElement);
+    highlightedCellElement = cell;
+    cell.classList.add('highlighted-cell');
+    // One rule in the nonce-approved stylesheet paints the column, including
+    // newly loaded rows, without scanning or adding classes to every cell.
+    if (!highlightedColumnRule) {
+      const sheet = document.querySelector('style[nonce]').sheet;
+      const index = sheet.insertRule(':not(*) { background: var(--vscode-list-inactiveSelectionBackground); }', sheet.cssRules.length);
+      highlightedColumnRule = sheet.cssRules[index];
+    }
+    const childIndex = cell.cellIndex + 1; // Includes the row-number header.
+    highlightedColumnRule.selectorText = '#table-wrap tbody tr > td:nth-child(' + childIndex + '), ' +
+      '#table-wrap thead tr > th:nth-child(' + childIndex + ')';
   }
 
   function scheduleSearch() {
@@ -964,6 +1011,14 @@ function getLargeFileWebviewHtml() {
   document.querySelector('thead').addEventListener('click', event => {
     const column = event.target.closest('th[data-column-index]');
     if (column) selectSearchColumn(Number(column.dataset.columnIndex));
+  });
+  document.querySelector('tbody').addEventListener('click', event => {
+    const number = event.target.closest('th.row-number');
+    if (number) highlightRow(number.parentElement);
+    else {
+      const cell = event.target.closest('td');
+      if (cell) highlightCell(cell);
+    }
   });
   window.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'f') {

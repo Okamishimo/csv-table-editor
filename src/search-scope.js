@@ -66,7 +66,7 @@ function decorateWebviewHtml(html) {
     const label = scoped ? csvSelectedColumnLabel() : '';
     filterEl.placeholder = scoped ? 'Find in column ' + label : 'Find in whole table';
     filterEl.title = scoped
-      ? 'Searching column ' + label + ' only; click its column header again to search the whole table'
+      ? 'Searching column ' + label + ' only; click its column header background again to search the whole table'
       : 'Searching the whole table; click a column header to limit the search';
     csvSearchScopeEl.textContent = scoped ? 'Column ' + label + ' only' : '';
   }
@@ -102,6 +102,28 @@ function decorateWebviewHtml(html) {
     if (sortH) {
 `,
     "column header click handler"
+  );
+  decorated = replaceOnce(
+    decorated,
+    `      const c = +sortH.dataset.sortcol;
+      toggleSort(c);
+      setSelection(-1, c); // sorting also selects the whole column
+`,
+    `      const c = +sortH.dataset.sortcol;
+      if (!csvHasColumnSearchScope() || sel.c !== c) {
+        setSelection(-1, c);
+        return;
+      }
+      // Sorting an already selected column keeps its selection and search scope.
+      toggleSort(c);
+`,
+    "sort selection guard"
+  );
+  decorated = replaceOnce(
+    decorated,
+    'title="Click to sort (ascending → descending → original)"',
+    'title="Click to select this column; once selected, click to sort (ascending → descending → original)"',
+    "sort tooltip"
   );
   return decorated;
 }

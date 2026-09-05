@@ -33,12 +33,20 @@ reopen or save with any of these via the clickable encoding label:
   `"Microsoft JhengHei", "Noto Sans TC", sans-serif`. Changes apply to both
   the editable grid and the streaming large-file preview.
 - `Cmd/Ctrl+F` searches across every cell with match highlighting and navigation.
-  Click a column header to search only that column; click the same header again
-  to return to whole-table search.
+  Click a column header to search only that column. To return to whole-table
+  search, click the same header again; in editing mode, click its background
+  outside the title, sort arrow, and delete button.
+- Click a row number to highlight that whole horizontal record in either the
+  editable grid or large-file preview. Row highlighting in the preview preserves
+  the current search scope, results, and match position.
 - Automatic header-row detection, keeping any metadata preamble above the table.
 - Three-state column sort (ascending → descending → original). Sorting is
-  **view-only** — it never reorders the data written back to disk.
-- Excel-style row and column highlighting for the selected cell.
+  **view-only** — it never reorders the data written back to disk. In editing
+  mode, clicking an unselected column's title or sort arrow selects it first;
+  subsequent clicks sort it while keeping the column selected.
+- Excel-style row and column highlighting for the selected cell, including
+  clicked cells in the read-only preview. Preview cell clicks preserve the
+  existing search scope, results, and match position.
 
 ### History and diff
 

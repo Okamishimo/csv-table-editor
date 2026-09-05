@@ -8,12 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-09-05
+
 ### Fixed
 
 - Release automation now finds draft releases by their pending tag before
   uploading or publishing, preventing the null `draft` error on a first release.
   Retrying after both assets uploaded publishes the existing draft and skips
   packaging without replacing either asset.
+
+### Added
+
+- Clicking a cell in the read-only preview highlights its row and column,
+  including their headers, without changing search or loading more pages.
+- Whole-row highlighting in the large-file preview through delegated row-number
+  clicks, preserving the current search scope, results, and match position.
+
+### Changed
+
+- Editable column titles and sort arrows first select an unselected column.
+  Sorting requires the whole column to already be selected and preserves that
+  selection through ascending, descending, and original order.
+
+## [0.0.10] - 2026-09-05
 
 ### Added
 
