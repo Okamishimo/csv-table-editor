@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-09-05
+
+### Fixed
+
+- Dragging the read-only preview's scrollbar out of the loaded window sent you
+  back to the first row instead of leaving you where you dropped it. A drag fast
+  enough to outrun the page being loaded could also leave you looking at empty
+  placeholder space; the preview now fetches where you actually stopped.
+
 ## [0.0.13] - 2026-09-05
 
 ### Added
