@@ -52,12 +52,21 @@ async function openPreview(t, lines) {
   t.after(() => document.dispose());
 
   const posted = [];
+  /** Waiters for messages that have not been posted yet. */
+  const pending = [];
   let receive;
   const panel = {
     webview: {
       options: {},
       html: "",
-      postMessage: (message) => { posted.push(message); return true; },
+      postMessage: (message) => {
+        posted.push(message);
+        for (const waiter of pending.splice(0)) {
+          if (waiter.match(message)) waiter.resolve(message);
+          else pending.push(waiter);
+        }
+        return true;
+      },
       onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; },
     },
     onDidDispose: () => ({ dispose() {} }),
@@ -66,16 +75,34 @@ async function openPreview(t, lines) {
 
   const send = (message) => receive(message);
   const of = (type) => posted.filter((message) => message.type === type);
-  /** Wait for the background indexing pass to report a total. */
-  const indexed = async () => {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      const done = of("fileIndex").find((message) => message.complete);
-      if (done) return done;
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    throw new Error("the file was never indexed");
+
+  /**
+   * Wait for a message the provider posts. Driven by the posts themselves
+   * rather than by a number of event-loop turns, because indexing is real file
+   * I/O whose cost is the machine's to decide.
+   */
+  const waitFor = (match, description) => {
+    const already = posted.find(match);
+    if (already) return Promise.resolve(already);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const index = pending.findIndex((waiter) => waiter.timer === timer);
+        if (index >= 0) pending.splice(index, 1);
+        reject(new Error(`timed out waiting for ${description}`));
+      }, 30000);
+      pending.push({
+        match,
+        timer,
+        resolve: (message) => { clearTimeout(timer); resolve(message); },
+      });
+    });
   };
-  return { document, posted, send, of, indexed, panel };
+
+  const indexed = () => waitFor(
+    (message) => message.type === "fileIndex" && message.complete,
+    "the file to be indexed"
+  );
+  return { document, posted, send, of, indexed, waitFor, panel };
 }
 
 function rows(count) {
