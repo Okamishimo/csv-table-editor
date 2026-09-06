@@ -722,8 +722,10 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
     switch (message.type) {
       case "ready":
         sendMetadata();
-        await loadPage("replace");
+        // Indexing starts first: the preview waits for the whole file to be
+        // read before it can be browsed, and says so from the first frame.
         startIndexing();
+        await loadPage("replace");
         break;
       case "nextPage":
         await loadPage("append", message.afterPage);
@@ -758,9 +760,10 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
         if (selected) {
           await document.setEncodingKey(encodingApi.encodingKey(selected.encoding));
           sendMetadata();
-          await loadPage("replace");
-          // Row boundaries depend on the encoding, so the index is read again.
+          // Row boundaries depend on the encoding, so the file is read again,
+          // and the preview waits for that read as it did for the first one.
           startIndexing();
+          await loadPage("replace");
         }
         break;
       }
@@ -893,7 +896,14 @@ function getLargeFileWebviewHtml() {
   .muted { color: var(--vscode-descriptionForeground); font-size: .9em; }
   #readonly { color: var(--vscode-descriptionForeground); white-space: nowrap; }
   #error { display: none; color: var(--vscode-errorForeground); padding: 8px 10px; }
+  #content { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   #table-wrap { overflow: auto; overflow-anchor: none; flex: 1 1 auto; min-height: 0; }
+  /* The whole file is read before any of it can be scrolled, so the reader
+     never drags a scrollbar whose length is still a guess. */
+  #preparing { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--vscode-editor-background); color: var(--vscode-descriptionForeground); }
+  #preparing[hidden] { display: none; }
+  #preparing-bar { width: 240px; height: 6px; overflow: hidden; border: 1px solid var(--vscode-panel-border); border-radius: 3px; background: var(--vscode-editorWidget-background); }
+  #preparing-fill { height: 100%; width: 0; background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); }
   table { border-collapse: collapse; min-width: 100%; white-space: nowrap; }
   th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 7px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
   thead { position: sticky; top: 0; z-index: 2; background: var(--vscode-editorWidget-background); }
@@ -934,7 +944,14 @@ function getLargeFileWebviewHtml() {
     <button id="edit">Enable Editing</button>
   </div>
   <div id="error"></div>
-  <div id="table-wrap"><table><thead></thead><tbody id="space-above"><tr><td></td></tr></tbody><tbody id="rows"></tbody><tbody id="space-below"><tr><td></td></tr></tbody></table></div>
+  <div id="content">
+    <div id="table-wrap"><table><thead></thead><tbody id="space-above"><tr><td></td></tr></tbody><tbody id="rows"></tbody><tbody id="space-below"><tr><td></td></tr></tbody></table></div>
+    <div id="preparing" hidden>
+      <div id="preparing-text">Reading the file…</div>
+      <div id="preparing-bar"><div id="preparing-fill"></div></div>
+      <span class="muted" id="preparing-percent">0%</span>
+    </div>
+  </div>
 <script nonce="${nonce}">
 (() => {
   const vscode = acquireVsCodeApi();
@@ -954,6 +971,11 @@ function getLargeFileWebviewHtml() {
   /** While a scan runs the view follows it, until the reader takes over. */
   let following = false;
   const filterDelayMs = 150;
+  /** How long the scroller must be still before its window is loaded. A wheel
+   *  gesture emits events for as long as it lasts, and its momentum for longer
+   *  still; loading each one would page through windows the reader has already
+   *  left behind. */
+  const scrollSettleMs = 120;
   let loading = false;
   let pageRequested = false;
   let reachedEnd = false;
@@ -963,7 +985,12 @@ function getLargeFileWebviewHtml() {
   let fullEditingAvailable = false;
   let fullEditingHardLimit = 511;
   let filterTimer = 0;
-  let autoloadFrame = 0;
+  let scrollSettleTimer = 0;
+  let scrollingUp = false;
+  /** True while the host is still reading the file. Until it has finished,
+   *  neither the row count nor the page offsets are known, so the preview shows
+   *  its progress rather than a window the reader cannot navigate. */
+  let preparing = false;
   let selectedSearchColumn = null;
   let selectedColumnCells = [];
   let highlightedRowElement = null;
@@ -1492,6 +1519,23 @@ function getLargeFileWebviewHtml() {
     following = false;
   }
 
+  /**
+   * Show how far the host has read while it reads. The file is counted and its
+   * pages located before any of it is browsable: until then the scrollbar spans
+   * a window rather than the file, and a drag lands nowhere in particular.
+   * A file that cannot be indexed is shown anyway, bounded to its window.
+   */
+  function showPreparing(message) {
+    const ready = Boolean(message.complete) || Boolean(message.failed);
+    preparing = !ready;
+    byId('preparing').hidden = ready;
+    byId('filter').disabled = preparing;
+    if (!preparing) return;
+    const percent = indexSize > 0 ? Math.min(99, Math.floor((indexedBytes / indexSize) * 100)) : 0;
+    byId('preparing-fill').style.width = percent + '%';
+    byId('preparing-percent').textContent = percent + '%';
+  }
+
   function requestNextPage() {
     if (loading || pageRequested || reachedEnd || !lastPageNumber) return;
     pageRequested = true;
@@ -1504,7 +1548,7 @@ function getLargeFileWebviewHtml() {
    * reader actually ended up.
    */
   function reconcileWindow() {
-    if (!absoluteScrolling() || loading || pageRequested) return;
+    if (preparing || !absoluteScrolling() || loading || pageRequested) return;
     const rows = byId('rows').rows;
     if (!rows.length) return;
     const wanted = rowAtViewportTop();
@@ -1531,15 +1575,11 @@ function getLargeFileWebviewHtml() {
     vscode.postMessage({ type: 'previousPage', beforePage: firstPageNumber });
   }
 
+  /** Load the window the reader stopped at. Called once a scroll gesture has
+   *  settled, never while it is still running. */
   function maybeLoadAdjacentPage() {
+    if (preparing) return;
     const tableWrap = byId('table-wrap');
-    // A scroll event caused by render's compensation is not another user scroll.
-    if (tableWrap.scrollTop === lastScrollTop) return;
-    const scrollingUp = tableWrap.scrollTop < lastScrollTop;
-    lastScrollTop = tableWrap.scrollTop;
-    // Scrolling is the reader taking over from a scan that was following along.
-    stopFollowing();
-    lastRequestedRow = -1;
 
     if (absoluteScrolling()) {
       const rows = byId('rows').rows;
@@ -1561,15 +1601,21 @@ function getLargeFileWebviewHtml() {
   }
 
   function scheduleMaybeLoadMore() {
-    if (typeof requestAnimationFrame !== 'function') {
+    const tableWrap = byId('table-wrap');
+    // A scroll event caused by render's compensation is not another user scroll.
+    if (tableWrap.scrollTop === lastScrollTop) return;
+    scrollingUp = tableWrap.scrollTop < lastScrollTop;
+    lastScrollTop = tableWrap.scrollTop;
+    // Scrolling is the reader taking over from a scan that was following along.
+    stopFollowing();
+    lastRequestedRow = -1;
+    // Where they end up is what they asked to read, so wait for the scrollbar
+    // to stop before loading anything.
+    clearTimeout(scrollSettleTimer);
+    scrollSettleTimer = setTimeout(() => {
+      scrollSettleTimer = 0;
       maybeLoadAdjacentPage();
-      return;
-    }
-    if (autoloadFrame) return;
-    autoloadFrame = requestAnimationFrame(() => {
-      autoloadFrame = 0;
-      maybeLoadAdjacentPage();
-    });
+    }, scrollSettleMs);
   }
 
   window.addEventListener('message', event => {
@@ -1598,12 +1644,15 @@ function getLargeFileWebviewHtml() {
       if (!loading) pageRequested = false;
       byId('edit').disabled = message.loading;
       if (message.loading) byId('status').textContent = 'Loading…';
-      if (!loading) reconcileWindow();
+      // A gesture still in progress will ask for its own window when it stops;
+      // reconciling now would load one the reader is already past.
+      if (!loading && !scrollSettleTimer) reconcileWindow();
     } else if (message.type === 'fileIndex') {
       indexedBytes = message.indexedBytes || 0;
       indexSize = message.size || 0;
       indexComplete = Boolean(message.complete);
       if (message.complete) totalRows = message.totalRows || 0;
+      showPreparing(message);
       rowHeight = measureRowHeight();
       updateSpacers();
       const rows = byId('rows').rows;

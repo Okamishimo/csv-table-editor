@@ -88,11 +88,21 @@ adjacent 100 rows, so you can move forward and backward without keeping the
 complete file in memory. The visible table stays bounded to 500 rows and lets
 you change the detected encoding.
 
-The scrollbar spans the whole file: the row count is worked out in the
-background, and everything outside the loaded window is shown as placeholder
-space, so the thumb tells you how far from the end you are. Dragging it anywhere
-loads that part of the file directly, and the status line reads
-`Rows 4,902–5,401 of 12,480,913`.
+The preview reads the whole file before you browse it. A progress bar reports
+that read; while it runs the table is covered and search is unavailable,
+because the length of the file, and therefore the meaning of the scrollbar, is
+not yet known. Choosing another encoding reads the file again. A file that
+cannot be read through is still previewed, with the scrollbar bounded to the
+loaded window.
+
+Once the read has finished the scrollbar spans the whole file: everything
+outside the loaded window is shown as placeholder space, so the thumb tells you
+how far from the end you are. Dragging it anywhere loads that part of the file
+directly, and the status line reads `Rows 4,902–5,401 of 12,480,913`.
+
+Rows are loaded for where you stop, not for everywhere you passed: a wheel or
+trackpad gesture, and a scrollbar drag, load one window once the scroller has
+come to rest.
 
 Search covers the **whole file**, not just the rows on screen. Typing
 highlights the rows already loaded; press **Enter** to read the file. Matches

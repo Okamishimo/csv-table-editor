@@ -27,6 +27,18 @@ function openPreview(t) {
   };
 }
 
+/** Scroll the way a reader does: move, then stop long enough to load. */
+async function scrollToRow(wrap, window, offset) {
+  wrap.scrollTop = offset;
+  wrap.dispatchEvent(new window.Event("scroll"));
+  await settle(window);
+}
+
+/** Loading waits for the scrollbar to stop, so a test must wait with it. */
+const SCROLL_SETTLE_MS = 120;
+const settle = (window) =>
+  new Promise((resolve) => window.setTimeout(resolve, SCROLL_SETTLE_MS + 60));
+
 /**
  * The matches the host's scan would report for the rows a test has loaded,
  * in the order the scan reports them: from `fromRow` down, then wrapping.
@@ -74,7 +86,7 @@ function cellColumnRule(document) {
     .find((rule) => rule.selectorText.includes("#table-wrap #rows tr > td:nth-child("));
 }
 
-test("paging preserves visible row geometry through eviction, fractional heights and scroll clamping", (t) => {
+test("paging preserves visible row geometry through eviction, fractional heights and scroll clamping", async (t) => {
   for (const mode of ["append", "prepend"]) {
     const { window, document, send, postedMessages } = openPreview(t);
     const body = document.getElementById("rows");
@@ -120,9 +132,11 @@ test("paging preserves visible row geometry through eviction, fractional heights
     else {
       wrap.scrollTop = 220;
       wrap.dispatchEvent(new window.Event("scroll"));
+      await settle(window);
       wrap.scrollTop = 180;
     }
     wrap.dispatchEvent(new window.Event("scroll"));
+    await settle(window);
     assert.equal(postedMessages.at(-1).type, mode === "append" ? "nextPage" : "previousPage");
     const visibleRow = Array.from(body.rows).find((row) => row.getBoundingClientRect().bottom > 26);
     const topBefore = visibleRow.getBoundingClientRect().top;
@@ -142,10 +156,12 @@ test("paging preserves visible row geometry through eviction, fractional heights
     assert.match(document.querySelector("style").textContent, /#table-wrap \{[^}]*overflow-anchor: none/);
     // Browsers emit this event asynchronously after our scrollTop adjustment.
     wrap.dispatchEvent(new window.Event("scroll"));
+    await settle(window);
     assert.equal(postedMessages.length, requestCount, "compensation must not trigger another page request");
     if (mode === "prepend") {
       wrap.scrollTop = 0;
       wrap.dispatchEvent(new window.Event("scroll"));
+      await settle(window);
       assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))), { type: "previousPage", beforePage: 5 });
     }
   }
@@ -512,6 +528,12 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
   assert.equal(
     JSON.stringify(postedMessages.at(-1)),
+    JSON.stringify({ type: "ready" }),
+    "a gesture still under way loads nothing"
+  );
+  await settle(window);
+  assert.equal(
+    JSON.stringify(postedMessages.at(-1)),
     JSON.stringify({ type: "nextPage", afterPage: 1 })
   );
 
@@ -637,7 +659,7 @@ test("large-file webview does not cascade page requests without another user scr
 
   document.getElementById("table-wrap").scrollTop = 1;
   document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
-  await new Promise((resolve) => window.setTimeout(resolve, 25));
+  await settle(window);
   send({ type: "loading", loading: true });
   send({
     type: "page",
@@ -653,13 +675,13 @@ test("large-file webview does not cascade page requests without another user scr
   });
   send({ type: "loading", loading: false });
   document.getElementById("table-wrap").dispatchEvent(new window.Event("scroll"));
-  await new Promise((resolve) => window.setTimeout(resolve, 25));
+  await settle(window);
 
   assert.equal(postedMessages.filter((message) => message.type === "nextPage").length, 1);
   dom.window.close();
 });
 
-test("large-file webview loads cached pages when scrolling upward", () => {
+test("large-file webview loads cached pages when scrolling upward", async () => {
   const postedMessages = [];
   const dom = new JSDOM(getLargeFileWebviewHtml(), {
     runScripts: "dangerously",
@@ -694,6 +716,7 @@ test("large-file webview loads cached pages when scrolling upward", () => {
 
   tableWrap.scrollTop = 0;
   tableWrap.dispatchEvent(new window.Event("scroll"));
+  await settle(window);
   assert.equal(
     JSON.stringify(postedMessages.at(-1)),
     JSON.stringify({ type: "previousPage", beforePage: 2 })
@@ -1056,9 +1079,10 @@ function openMeasuredPreview(t) {
   const spacer = (id) => Number.parseFloat(
     document.getElementById(id).rows[0].cells[0].style.height
   ) || 0;
-  const scrollTo = (offset) => {
+  const scrollTo = async (offset) => {
     wrap.scrollTop = offset;
     wrap.dispatchEvent(new window.Event("scroll"));
+    await settle(window);
   };
   const offsetOfRow = (row) => (row - 2) * ROW_HEIGHT + HEAD_HEIGHT;
   return { ...harness, wrap, page, index, spacer, scrollTo, offsetOfRow, setRenderedRowHeight };
@@ -1095,13 +1119,13 @@ test("evicted rows become placeholder height, so nothing moves and the scrollbar
   assert.equal(wrap.scrollTop, 0, "growing the placeholder above must not shift the view");
 });
 
-test("dragging the scrollbar far away loads that part of the file and stays there", (t) => {
+test("dragging the scrollbar far away loads that part of the file and stays there", async (t) => {
   const { document, page, index, scrollTo, offsetOfRow, postedMessages, spacer } =
     openMeasuredPreview(t);
   page(1, "replace");
   index(10000);
 
-  scrollTo(offsetOfRow(5000));
+  await scrollTo(offsetOfRow(5000));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "gotoRow", row: 5000 }, "the reader is asking for row 5000, not the next page");
 
@@ -1115,7 +1139,7 @@ test("dragging the scrollbar far away loads that part of the file and stays ther
   assert.match(document.getElementById("status").textContent, /of 10,000/);
 });
 
-test("scrolling inside the loaded window fetches neighbours rather than jumping", (t) => {
+test("scrolling inside the loaded window fetches neighbours rather than jumping", async (t) => {
   const { send, page, index, scrollTo, offsetOfRow, postedMessages } = openMeasuredPreview(t);
   page(1, "replace");
   index(10000);
@@ -1123,27 +1147,27 @@ test("scrolling inside the loaded window fetches neighbours rather than jumping"
   const clearPending = () => send({ type: "loading", loading: false });
 
   // Well inside the window: 51 rows of loaded data still lie below the viewport.
-  scrollTo(offsetOfRow(250));
+  await scrollTo(offsetOfRow(250));
   assert.equal(postedMessages.at(-1).type, "ready", "a scroll with room to spare fetches nothing");
 
   // Close enough to the bottom of the window that the next page is wanted.
-  scrollTo(offsetOfRow(255));
+  await scrollTo(offsetOfRow(255));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "nextPage", afterPage: 3 }, "the neighbour is paged in, not jumped to");
 
   clearPending();
-  scrollTo(offsetOfRow(4));
+  await scrollTo(offsetOfRow(4));
   assert.equal(postedMessages.at(-1).type, "nextPage",
     "page 1 is already loaded, so there is nothing above to fetch");
 });
 
-test("scrolling up from a window that starts mid-file pages backwards", (t) => {
+test("scrolling up from a window that starts mid-file pages backwards", async (t) => {
   const { send, page, index, scrollTo, offsetOfRow, postedMessages, wrap } = openMeasuredPreview(t);
   page(1, "replace");
   index(10000);
 
   // Drag far away, and let the host answer the way it does for a jump.
-  scrollTo(offsetOfRow(1905));
+  await scrollTo(offsetOfRow(1905));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "gotoRow", row: 1905 });
   page(20, "replace", { keepScroll: true });
@@ -1153,24 +1177,24 @@ test("scrolling up from a window that starts mid-file pages backwards", (t) => {
     "the window covers where they are, so nothing more is fetched");
 
   // Now edge towards the top of that window.
-  scrollTo(offsetOfRow(1904));
+  await scrollTo(offsetOfRow(1904));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "previousPage", beforePage: 20 });
 });
 
-test("a drag that outruns the answer is reconciled once the answer arrives", (t) => {
+test("a drag that outruns the answer is reconciled once the answer arrives", async (t) => {
   const { send, page, index, scrollTo, offsetOfRow, postedMessages, wrap } = openMeasuredPreview(t);
   page(1, "replace");
   index(10000);
 
   // The reader drags to row 3000; that request goes out.
-  scrollTo(offsetOfRow(3000));
+  await scrollTo(offsetOfRow(3000));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "gotoRow", row: 3000 });
 
   // They keep dragging while it is in flight, so the next positions are dropped.
   send({ type: "loading", loading: true });
-  scrollTo(offsetOfRow(7000));
+  await scrollTo(offsetOfRow(7000));
   assert.equal(postedMessages.at(-1).row, 3000, "one request is in flight at a time");
 
   // The stale answer arrives and does not cover where they ended up.
@@ -1205,7 +1229,7 @@ test("while a scan sweeps the file the view follows it, until the reader takes o
   assert.equal(wrap.scrollTop, offsetOfRow(5902));
 
   // The reader scrolling is them taking over.
-  scrollTo(offsetOfRow(5910));
+  await scrollTo(offsetOfRow(5910));
   const held = wrap.scrollTop;
   page(90, "replace", { follow: true });
   assert.equal(wrap.scrollTop, held, "a followed page is ignored once the reader has taken over");
@@ -1231,6 +1255,71 @@ test("finding a match stops the view chasing the scan", async (t) => {
   assert.equal(wrap.scrollTop, settled, "a result is more interesting than the sweep");
   assert.equal(document.getElementById("rows").rows[0].dataset.rowNumber, "2",
     "the reader keeps looking at the match, not the scan");
+});
+
+test("a wheel gesture loads where it stops, not every window it passes", async (t) => {
+  const { wrap, window, page, index, offsetOfRow, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+
+  // One gesture, reported as a stream of events the way a wheel or trackpad
+  // reports it. Nothing may be requested while it is still running.
+  for (const row of [400, 1200, 2600, 4000, 5000]) {
+    wrap.scrollTop = offsetOfRow(row);
+    wrap.dispatchEvent(new window.Event("scroll"));
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  }
+  assert.equal(postedMessages.filter((message) => message.type !== "ready").length, 0,
+    "a gesture in progress asks for nothing");
+
+  await settle(window);
+  const requests = postedMessages.filter((message) => message.type !== "ready");
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{ type: "gotoRow", row: 5000 }],
+    "one request, for the window the reader actually stopped at");
+});
+
+test("the file is read before it can be browsed", async (t) => {
+  const { document, window, wrap, send, page, offsetOfRow, postedMessages } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  send({ type: "fileIndex", totalRows: 0, complete: false, indexedBytes: 250, size: 1000 });
+
+  const overlay = document.getElementById("preparing");
+  assert.equal(overlay.hidden, false, "the reader is shown the read, not a partial window");
+  assert.equal(document.getElementById("preparing-fill").style.width, "25%");
+  assert.equal(document.getElementById("preparing-percent").textContent, "25%");
+  assert.equal(document.getElementById("filter").disabled, true,
+    "searching a file that is still being read would scan behind the reader");
+
+  wrap.scrollTop = offsetOfRow(300);
+  wrap.dispatchEvent(new window.Event("scroll"));
+  await settle(window);
+  assert.equal(postedMessages.filter((message) => message.type !== "ready").length, 0,
+    "nothing is loaded until the whole file has been read");
+
+  send({ type: "fileIndex", totalRows: 10000, complete: true, indexedBytes: 1000, size: 1000 });
+  assert.equal(overlay.hidden, true, "the count is in, so the file is browsable");
+  assert.equal(document.getElementById("filter").disabled, false);
+
+  await scrollToRow(wrap, window, offsetOfRow(5000));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "gotoRow", row: 5000 });
+});
+
+test("a file that cannot be indexed is still shown", async (t) => {
+  const { document, window, wrap, send, page, offsetOfRow, postedMessages } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  send({ type: "fileIndex", totalRows: 0, complete: false, indexedBytes: 250, size: 1000 });
+  send({ type: "fileIndex", totalRows: 0, complete: false, failed: true });
+
+  assert.equal(document.getElementById("preparing").hidden, true);
+  assert.equal(document.getElementById("filter").disabled, false);
+  wrap.scrollTop = offsetOfRow(60);
+  wrap.dispatchEvent(new window.Event("scroll"));
+  await settle(window);
+  assert.equal(postedMessages.at(-1).type, "nextPage",
+    "without a count the preview pages through the window as it always did");
 });
 
 test("counting progress is shown until the total is known", (t) => {
@@ -1262,13 +1351,13 @@ test("a layout that disagrees with the arithmetic is corrected, not argued with"
     `the first row must sit where the row arithmetic says: ${measured}`);
 });
 
-test("a window that does not cover the reader is accepted rather than asked for again", (t) => {
+test("a window that does not cover the reader is accepted rather than asked for again", async (t) => {
   const { document, send, page, index, scrollTo, offsetOfRow, postedMessages } =
     openMeasuredPreview(t);
   page(1, "replace");
   index(10000);
 
-  scrollTo(offsetOfRow(5000));
+  await scrollTo(offsetOfRow(5000));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "gotoRow", row: 5000 });
 
@@ -1283,7 +1372,7 @@ test("a window that does not cover the reader is accepted rather than asked for 
   assert.doesNotMatch(document.getElementById("status").textContent, /Loading/);
 
   // Moving again is a fresh intent, so the preview does ask once more.
-  scrollTo(offsetOfRow(5001));
+  await scrollTo(offsetOfRow(5001));
   assert.equal(postedMessages.filter((message) => message.type === "gotoRow").length, 2);
 });
 

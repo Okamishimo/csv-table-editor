@@ -195,6 +195,13 @@ Large-file protections are correctness requirements, not optional tuning.
   unbounded again, and do not put it back on disk; a full scan of a large file
   would otherwise leave gigabytes in the temporary directory, and a crash would
   leave them behind.
+- The preview reads the whole file before any of it can be browsed. While that
+  read runs, the table is covered by a progress overlay, search is disabled, and
+  scrolling loads nothing: the row count and page offsets decide what the
+  scrollbar means, and a reader dragging a scrollbar that measures a window
+  rather than the file lands nowhere in particular. The overlay clears when the
+  index completes, and also when it fails, because a file that cannot be indexed
+  is still previewed with the scrollbar bounded to the loaded window.
 - The preview counts the file's rows once, in the background, and records where
   every page begins. The count must agree exactly with `StreamingCsvParser`, so
   the index reads the file's own units and mirrors its quote and terminator
@@ -237,8 +244,13 @@ Large-file protections are correctness requirements, not optional tuning.
   eviction; do not estimate offsets from one row's height. Keep browser scroll
   anchoring disabled on the preview scroller and ignore compensation scroll
   events. Refresh search highlights during paging without scrolling to a match.
-- Automatic loading must be triggered by real user scrolling. Rendering,
-  searching, or filtering must not start an uncontrolled page-request chain.
+- Automatic loading must be triggered by real user scrolling that has stopped.
+  A scroll event records where the reader went; the request waits for the
+  scroller to settle, so one gesture loads one window rather than every window
+  it passed over, and a window answering a position the reader has already left
+  is never asked for. Reconciliation after a load defers to a gesture still in
+  flight. Rendering, searching, or filtering must not start an uncontrolled
+  page-request chain.
 - The editable grid renders only the rows near the viewport, with two spacer
   rows standing in for the rest so the scrollbar keeps measuring the whole
   file. Measure the row height instead of assuming it, and render every row
