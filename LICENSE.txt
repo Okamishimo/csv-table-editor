@@ -1,6 +1,11 @@
 MIT License
 
-Copyright (c) 2026 Edgar Dang
+Original work Copyright (c) 2026 Edgar Dang
+Modified work Copyright (c) 2026 Mete (Okamishimo)
+
+This is an adaptation of Edgar Dang's CSV Table Editor. The original notice is
+kept above, as the MIT license requires; the changes in this adaptation are
+copyright its own author and released under the same terms.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

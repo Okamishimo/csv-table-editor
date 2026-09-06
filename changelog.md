@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PR may change the version, and it must.
 - A merged pull request's branch is deleted by the repository setting rather
   than by a workflow of ours.
+- The readme is a page about the extension again: large files, private updates
+  and the release workflow moved to a page each under `docs/`, which it links
+  to, and a Traditional Chinese translation of it lives at
+  `docs/readme.zh-tw.md`.
+- The readme says plainly that this is a personal adaptation of Edgar Dang's
+  CSV Table Editor, and `LICENSE.txt` now carries the copyright of this
+  adaptation alongside the original author's, which the MIT license requires be
+  kept. The readme's license link points at this repository's own license.
 
 ## [0.0.18] - 2026-09-06
 

@@ -169,7 +169,7 @@ Keep the repository private rather than making it public to enable protections.
   tag updates and deletion. It does not restrict tag creation.
 - Configuration files do not prove server enforcement. Once the plan supports
   protection, ensure the workflows are deployed and their checks have run, then
-  follow the [README setup](../readme.md#server-protection-setup) and query the
+  follow the [protection setup](../docs/releasing.md#server-protection-setup) and query the
   resulting state. Do not create duplicate rulesets.
 - GitHub tag rules have no native main-ancestry condition. Hooks can be bypassed;
   release CI rejects publication after a tag reaches GitHub. Do not describe
