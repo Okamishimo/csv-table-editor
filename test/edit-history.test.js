@@ -291,3 +291,21 @@ test("an edit message stays small however large the grid is", () => {
   assert.ok(editBytes < 200,
     `an edit must describe the change, not the grid: ${editBytes} bytes against ${gridBytes}`);
 });
+
+test("saving rapid edits flushes the focused cell once and preserves undo deltas", (t) => {
+  const h = openGrid("id,name\n1,Alice\n2,Bob");
+  t.after(() => h.window.close());
+  editCell(h, 1, 1, "Alicia");
+  const cell = h.document.querySelector('td[data-r="2"][data-c="1"] .cell');
+  cell.focus();
+  cell.textContent = "Bobby";
+  assert.deepEqual(h.grid(), [["id", "name"], ["1", "Alicia"], ["2", "Bobby"]]);
+  assert.equal(h.edits().length, 2);
+  h.grid();
+  assert.equal(h.edits().length, 2, "repeated saves do not duplicate undo entries");
+  cell.blur();
+  assert.equal(h.edits().length, 2, "leaving the saved cell does not commit it twice");
+  h.record();
+  h.undo();
+  assert.equal(h.grid()[2][1], "Bob");
+});

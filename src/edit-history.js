@@ -294,6 +294,13 @@ function decorateWebviewHtml(html) {
     "undo/redo handler"
   );
 
+  decorated = replaceOnce(
+    decorated,
+    "      case 'requestGridData':",
+    "      case 'requestGridData':\n        flushCsvActiveEdit();",
+    "commit the focused cell before saving or comparing history"
+  );
+
   return decorated;
 }
 

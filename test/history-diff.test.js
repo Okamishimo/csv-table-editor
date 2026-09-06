@@ -246,3 +246,53 @@ test("the nonce covers both the stylesheet and the script", () => {
   assert.ok(html.includes(`<script nonce="${policy[1]}">`));
   assert.doesNotMatch(html, /\son[a-z]+=/, "no inline event handlers");
 });
+
+test("several adjacent edits align as changed rows with only their changed cells highlighted", () => {
+  const diff = buildDiff("id,name\n1,A\n2,B\n3,C", "id,name\n1,AA\n2,BB\n3,CC");
+  assert.equal(diff.counts.changed, 3);
+  assert.equal(diff.counts.added, 0);
+  assert.equal(diff.counts.removed, 0);
+  for (const entry of diff.entries.slice(1)) assert.deepEqual([...changedSlots(entry, diff.slots)], [1]);
+});
+
+function navigableDiff(t, before, after) {
+  const scrolled = [];
+  const dom = new JSDOM(diffHtml(before, after, "Changes"), {
+    runScripts: "dangerously",
+    beforeParse(window) {
+      window.HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this); };
+    },
+  });
+  t.after(() => dom.window.close());
+  return { document: dom.window.document, window: dom.window, scrolled };
+}
+
+test("history opens at its first change and buttons and keyboard move both panes", (t) => {
+  const { document, window, scrolled } = navigableDiff(t,
+    "id,name\n1,A\n2,B\n3,C\n4,D", "id,name\n1,A\n2,BB\n3,C\n4,DD");
+  const count = document.getElementById("change-position");
+  assert.equal(count.textContent, "1/2 changes");
+  assert.equal(scrolled.length, 2);
+  assert.equal(scrolled[1].textContent, "BB");
+  assert.equal(document.querySelectorAll("tr.diff-current").length, 2);
+  document.getElementById("change-next").click();
+  assert.equal(count.textContent, "2/2 changes");
+  assert.equal(scrolled.at(-1).textContent, "DD");
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "F7", shiftKey: true, bubbles: true }));
+  assert.equal(count.textContent, "1/2 changes");
+  document.getElementById("change-prev").click();
+  assert.equal(count.textContent, "2/2 changes");
+});
+
+test("history navigation covers added and removed rows and columns and disables itself for identical files", (t) => {
+  for (const [before, after] of [["id\n1", "id\n1\n2"], ["id\n1\n2", "id\n1"], ["id\n1", "id,note\n1,new"]]) {
+    const { document, scrolled } = navigableDiff(t, before, after);
+    assert.equal(scrolled.length, 2);
+    assert.equal(document.getElementById("change-next").disabled, false);
+  }
+  const { document, scrolled } = navigableDiff(t, "id\n1", "id\n1");
+  assert.equal(scrolled.length, 0);
+  assert.equal(document.getElementById("change-position").textContent, "No changes");
+  assert.equal(document.getElementById("change-next").disabled, true);
+  assert.equal(document.getElementById("change-prev").disabled, true);
+});

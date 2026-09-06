@@ -189,6 +189,13 @@ test("workflow wiring validates ancestry before publication and calls release ex
   assert.match(merge, /needs: tag/);
   assert.match(merge, /if: needs.tag.outputs.kind == 'release'/);
   assert.match(merge, /kind: \$\{\{ steps.tag.outputs.kind \}\}/);
+  const deletion = read("delete-merged-branch.yml");
+  assert.match(deletion, /types: \[closed\]/);
+  assert.match(deletion, /github.event.pull_request.merged == true/);
+  assert.match(deletion, /head.repo.full_name == github.repository/);
+  assert.doesNotMatch(deletion, /actions\/checkout/, "deleting a ref needs no working tree");
+  assert.doesNotMatch(deletion, /\$\{\{ github.event.pull_request.head.ref \}\}"/,
+    "a branch name reaches the script as data, never interpolated into it");
   assert.match(read("pull-request.yml"), /reopened, edited/);
   assert.match(read("pull-request.yml"), /run: npm run verify/);
   const verify = read("pull-request.yml").split("  verify:\n")[1];

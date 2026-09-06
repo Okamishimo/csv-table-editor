@@ -131,13 +131,28 @@ const replacements = [
     name: "large file save bypass",
     from: 'async saveCustomDocument(e,t){await e.save(t),await this.captureHistory(e,e.uri)}',
     to: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{await e.save(t),await this.captureHistory(e,e.uri)})}',
-    already: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{await e.save(t),await this.captureHistory(e,e.uri)})}',
+    already: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{',
   },
   {
     name: "large file save-as bypass",
     from: 'async saveCustomDocumentAs(e,t,n){await e.saveAs(t,n),await this.captureHistory(e,t)}',
     to: 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);return require("../src/save-progress").withSaveProgress(s,t,async()=>{await e.saveAs(t,n),await this.captureHistory(e,t)})}',
-    already: 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);return require("../src/save-progress").withSaveProgress(s,t,async()=>{await e.saveAs(t,n),await this.captureHistory(e,t)})}',
+    already: 'async saveCustomDocumentAs(e,t,n){if(e.isLargeFile)return e.saveAs(t,n);return require("../src/save-progress").withSaveProgress(s,t,async()=>{',
+  },
+  {
+    name: "serialized history index updates",
+    from: 'this._history=new h.HistoryStore(e)',
+    to: 'this._history=require("../src/save-history").installStore(new h.HistoryStore(e),s)',
+  },
+  {
+    name: "save exact bytes to history",
+    from: 'await e.save(t),await this.captureHistory(e,e.uri)',
+    to: 'await require("../src/save-history").saveDocument(this,e,e.uri,t,s)',
+  },
+  {
+    name: "save-as exact bytes to history",
+    from: 'await e.saveAs(t,n),await this.captureHistory(e,t)',
+    to: 'await require("../src/save-history").saveDocument(this,e,t,n,s)',
   },
 ];
 
