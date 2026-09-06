@@ -5,4 +5,8 @@ scripts/**
 *.vsix
 *.vsix.sha256
 .github/**
+.githooks/**
+.agents/**
+.claude/**
 AGENTS.md
+CLAUDE.md

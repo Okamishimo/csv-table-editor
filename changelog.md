@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-09-06
+
+### Added
+
+- Documentation PRs titled `Docs: description` use quick file-scope and whitespace
+  checks, require no version bump, and skip tagging and publication after merging.
+  Code, configuration, and workflow changes under a Docs title fail validation.
+- Shared release preflight skill for Codex and Claude Code, with a central
+  contributor release policy and task-specific loading instructions.
+- Local staged-content verification before commits, and push guards requiring
+  PRs for main and tags to point to commits already on remote main.
+- Release PR title/version checks and full verification in GitHub Actions.
+  Merged release PRs automatically tag their merge commit and call the existing
+  private publication workflow, which also checks tag ancestry.
+- Prepared main and immutable-tag protection configurations for activation when
+  the private repository's GitHub plan supports them.
+
 ## [0.0.15] - 2026-09-06
 
 ### Changed

@@ -1,6 +1,11 @@
 name: Private extension release
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
   push:
     tags: ['v*']
   release:
@@ -10,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-release-${{ github.event.release.tag_name || github.ref_name }}
+  group: private-release-${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -20,16 +25,19 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+      - name: Require tag commit to belong to main
+        run: node scripts/release-policy.js check-tag
       - name: Validate version and prevent replacement of release assets
         id: prepare
         env:

@@ -4,6 +4,29 @@
 
 These instructions apply to the entire repository.
 
+## Pull Requests, Commits, and Tags
+
+Before branch/commit/push operations, creating/reviewing/merging a PR, changing
+versions, tagging, packaging, publishing/recovering a release, or modifying hooks,
+Actions or repository protection, **read [.github/release-rules.md](.github/release-rules.md)**.
+Also read it when answering whether this repository's release automation or
+protection is enabled. It is the canonical workflow policy for this repository;
+apply it together with the editing, testing and release safety rules below.
+
+All changes to `main` go through a PR: `Release vX.Y.Z: description` for releases,
+or `Docs: description` for documentation-only changes. Docs PRs must pass the
+strict file-scope and whitespace quick checks; they do not bump versions, create
+tags, or publish releases. Code, configuration, and workflow changes require a
+Release PR even when mixed with documentation.
+Commit verification must pass; do not bypass hooks or push directly to main.
+Detailed rules and the distinction between automatic tagging and GitHub's
+server protection are maintained in the linked file, not duplicated here.
+
+For release preflight checks or preparing a release PR, use `release-preflight`:
+read [.claude/skills/release-preflight/SKILL.md](.claude/skills/release-preflight/SKILL.md).
+Codex discovers it through `.agents/skills/release-preflight/SKILL.md`; Claude Code
+loads the shared skill directly. Keep the procedure in that one shared file.
+
 ## Project Overview
 
 This repository contains a customized VS Code CSV/TSV table editor. It supports
@@ -446,10 +469,12 @@ be included or bundled: packaging uses `--no-dependencies`.
 
 ### GitHub Actions Publication and Recovery
 
-- The workflow runs on pushed `v*` tags and published Releases, checks out the
+- The workflow runs after a release PR merges through a reusable workflow call,
+  and on pushed `v*` tags and published Releases. It checks out the
   triggering tag, and uses Node 22 with `npm ci`. Stable tags must be exactly
   `v<package.json version>`; keep `package-lock.json` in sync with version changes.
-  Commit and push the release changes to the branch before pushing its tag.
+  Commit and push release changes to a topic branch, open a release PR, and
+  merge only after its checks pass; the merge workflow creates the tag on main.
 - Publication uses the job's `contents: write` permission and short-lived
   `GITHUB_TOKEN`; no custom PAT or Marketplace Secret is required. The workflow
   builds, tests, checks patch idempotency, packages, verifies contents, and

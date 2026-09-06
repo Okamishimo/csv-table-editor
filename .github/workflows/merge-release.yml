@@ -1,0 +1,47 @@
+name: Tag merged release PR
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merged-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      kind: ${{ steps.tag.outputs.kind }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      # Only merged, trusted code is checked out; never the unmerged PR head.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Skip documentation publication or tag the merged release
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-policy.js tag
+  release:
+    needs: tag
+    if: needs.tag.outputs.kind == 'release'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/private-release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
