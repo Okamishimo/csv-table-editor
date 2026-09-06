@@ -90,6 +90,8 @@ into the original runtime by `scripts/patch-distribution.js`.
 - `package.json`: VS Code manifest, settings, dependencies, and scripts.
 - `readme.md` and `changelog.md`: User-facing behavior and release notes. Use
   these exact lowercase filenames; GitHub Actions runs on Linux.
+- `docs/`: The readme's longer subjects, one page each, plus the Traditional
+  Chinese translation of the readme itself.
 
 ## Non-Negotiable Editing Rules
 
@@ -458,7 +460,18 @@ actually changed.
 ## Documentation
 
 Update `readme.md` when user-visible behavior, settings, limits, or usage
-changes. Add unreleased changes to the `[Unreleased]` section of `changelog.md`.
+changes. The subjects too long for it have a page each under `docs/`:
+`docs/large-files.md` for the streaming preview, `docs/updates.md` for the
+private updater, and `docs/releasing.md` for the release workflow and
+repository protection. Change the page that owns the subject instead of
+restating it in the readme, which links to them.
+
+`docs/readme.zh-tw.md` is a Traditional Chinese translation of `readme.md`, and
+of nothing else; the pages under `docs/` are English. When a change alters the
+readme's own sections, alter the translation with it, and say plainly if you
+have left it behind.
+
+Add unreleased changes to the `[Unreleased]` section of `changelog.md`.
 Keep descriptions aligned with the row/column terminology above.
 
 ## Packaging and Releases
