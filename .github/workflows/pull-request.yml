@@ -1,0 +1,61 @@
+name: Pull request checks
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: PR policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      kind: ${{ steps.policy.outputs.kind }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate PR type and documentation scope or release version
+        id: policy
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/release-policy.js pr
+  verify:
+    name: Verify
+    needs: policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Documentation quick checks passed
+        if: needs.policy.outputs.kind == 'docs'
+        run: echo "Documentation scope and whitespace verified; full release tests are not required for this PR."
+      - uses: actions/checkout@v4
+        if: needs.policy.outputs.kind == 'release'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: needs.policy.outputs.kind == 'release'
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+        if: needs.policy.outputs.kind == 'release'
+      - run: npm run verify
+        if: needs.policy.outputs.kind == 'release'
+      - name: Require generated distribution changes to be committed
+        if: needs.policy.outputs.kind == 'release'
+        run: git diff --exit-code

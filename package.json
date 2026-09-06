@@ -2,7 +2,7 @@
 	"name": "csv-table-editor",
 	"displayName": "CSV Table Editor — Encoding & History",
 	"description": "Open, view and edit CSV/TSV files as a spreadsheet grid: sort, filter, search, pick the encoding (UTF-8, UTF-16, Shift_JIS, Windows-1252/1258...), keep a save history and compare versions as a side-by-side table diff.",
-	"version": "0.0.15",
+	"version": "0.0.16",
 	"publisher": "Edgar-Dang",
 	"license": "MIT",
 	"icon": "media/icon.png",
@@ -108,6 +108,9 @@
 		]
 	},
 	"scripts": {
+		"prepare": "node scripts/install-hooks.js",
+		"hooks:install": "node scripts/install-hooks.js",
+		"precommit": "node scripts/pre-commit.js",
 		"vscode:prepublish": "npm run build",
 		"compile": "webpack",
 		"watch": "webpack --watch",
