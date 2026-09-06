@@ -85,9 +85,11 @@ committing, pushing, creating or merging a PR, tagging, packaging, or publishing
   Inspect `core.hooksPath` and the pre-commit/pre-push hooks. Use the project's
   installation procedure where needed, preserving existing custom hooks and
   never bypassing checks.
-- Run `npm run verify` against the final intended contents and record its exit
-  result and test count. This covers the build, syntax checks, full test suite,
-  and patch idempotency. Do not run the obsolete compile task.
+- When the changes are being committed, the pre-commit hook runs `npm run verify`
+  against the staged contents; take its output as the verification result rather
+  than running the same pass first. Run it directly only when nothing is being
+  committed. It covers the build, syntax checks, full test suite, and patch
+  idempotency. Do not run the obsolete compile task.
 - Inspect the build diff and run `git diff --check`. If the build updates the
   distribution, verify it came from the patch script and include it in the
   intended changes. Do not describe unstaged output as committed.
@@ -128,7 +130,8 @@ evidence, and next steps. Include:
   contents, or commit SHA.
 - Version/documentation issues, existing tag or artifact conflicts, and the
   `npm run verify` result.
-- PR checks, workflow deployment, and server protection; label unverified items.
+- Workflow deployment and server protection; label unverified items. Do not
+  poll a created PR's checks to report them: creating the PR ends the task.
 - Whether the work is ready for PR creation, merge, or publication, and any
   remaining blockers.
 

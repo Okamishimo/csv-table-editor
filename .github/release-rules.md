@@ -72,6 +72,10 @@ authorize commits, pushes, merges, or publication. Follow the current task scope
   using locally installed dependencies. Keep dependencies current with `npm ci`.
 - Verification includes distribution patching, JavaScript syntax checks, the
   full test suite, and patch idempotency. Any failure blocks the commit.
+- The hook is that verification pass. Do not run `npm run verify` again just
+  before committing: it checks the same contents the hook is about to check,
+  and a commit cannot slip past a failure. Run tests while developing, as often
+  as the work needs, then commit and let the hook have the last word.
 - Unstaged fixes must not hide failures in the staged contents.
 - If the build changes staged `dist/extension.js`, run `npm run build`, stage the
   generated change, and retry. Never hand-edit the vendor bundle.
@@ -151,8 +155,10 @@ Keep the repository private rather than making it public to enable protections.
 
 An agent's work on a release ends when the PR exists. State what remains local,
 what is committed and pushed, and confirm the PR was created, giving its number,
-title, and base. Reporting the result of its `PR policy` and `Verify` checks is
-useful; nothing past that belongs in the report.
+title, and base. Then stop: do not wait for, poll, or report `PR policy` and
+`Verify`. Those checks are the maintainer's to watch, and polling them only
+makes the task run longer without adding anything the maintainer cannot see on
+the PR itself.
 
 Merging the PR, the tag its merge creates, the release workflow's run, and the
 published Release are the maintainer's to carry out and confirm. Do not merge a
