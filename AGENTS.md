@@ -53,6 +53,8 @@ into the original runtime by `scripts/patch-distribution.js`.
   release lookup, package verification, checksum generation, and publication.
 - `.github/workflows/private-release.yml`: Builds and packages tagged versions,
   then uploads the VSIX and checksum to the private GitHub Release.
+- `.github/workflows/delete-merged-branch.yml`: Deletes a merged PR's head
+  branch. It never checks anything out and never touches the default branch.
 - `src/encoding-detector.js`: BOM, BOM-less UTF-16, strict UTF-8, and scored
   legacy-encoding detection.
 - `src/large-file-guard.js`: Editable-grid size limits and oversized-file

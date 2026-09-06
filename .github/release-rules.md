@@ -104,6 +104,10 @@ Topic branch -> staged verification -> commit -> push -> Release vX.Y.Z: descrip
 -> call the private release workflow -> package, verify, publish
 ```
 
+- [delete-merged-branch.yml](workflows/delete-merged-branch.yml) deletes a merged
+  PR's head branch, for Docs and Release PRs alike. A PR closed without merging
+  keeps its branch, and the deletion cannot affect a tag: that points at the
+  merge commit on main. Do not delete branches by hand in anticipation of it.
 - [merge-release.yml](workflows/merge-release.yml) handles merged PRs into main.
   Closing an unmerged PR does not create a tag. A merged Docs PR reports that
   publication is skipped and never calls the tag API or release workflow.

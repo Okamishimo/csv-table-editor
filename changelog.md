@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - History comparisons jump to the first change and offer previous/next change
   buttons, a position counter, and Shift+F7/F7 keyboard navigation.
+- Merging a pull request deletes its head branch automatically. A pull request
+  closed without merging keeps its branch.
 
 ## [0.0.17] - 2026-09-06
 
