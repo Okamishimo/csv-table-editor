@@ -105,7 +105,9 @@ directly, and the status line reads `Rows 4,902–5,401 of 12,480,913`.
 
 Rows are loaded for where you stop, not for everywhere you passed: a wheel or
 trackpad gesture, and a scrollbar drag, load one window once the scroller has
-come to rest.
+come to rest. Landing somewhere new brings 200 rows at once, and if the screen
+is taller than that the preview keeps reading downward until it is filled, so a
+fast scroll never leaves you looking at a few rows above blank space.
 
 Typing highlights the rows already loaded. Press **Enter** to search downward
 from the first visible row, continuing beyond the loaded window and stopping at

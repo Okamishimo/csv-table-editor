@@ -134,14 +134,23 @@ test("a scrollbar jump keeps the reader where they dragged to", async (t) => {
   await send({ type: "ready" });
   await indexed();
 
+  const before = of("page").length;
   await send({ type: "gotoRow", row: 1500 });
-  const jump = of("page").at(-1);
+  const [jump, below] = of("page").slice(before);
 
   assert.equal(jump.mode, "replace", "the window is replaced with the rows around that point");
   assert.equal(jump.keepScroll, true,
     "a jump the reader made must not send them back to the first row");
   assert.equal(jump.startRow, 1402, "row 1500 lives on the page starting at 1402");
   assert.ok(jump.rows.some((row) => row[0] === "1499"), "and that page holds the row asked for");
+
+  // A jump can land on the last row of its page, so the page below it comes
+  // with the same answer rather than leaving the screen mostly blank.
+  assert.ok(below, "the jump answers with the page below it as well");
+  assert.equal(below.mode, "append");
+  assert.equal(below.startRow, 1502);
+  assert.equal(jump.rows.length + below.rows.length, 200,
+    "so a jump lands in a window deep enough to fill the viewport");
 });
 
 test("a jump to a match carries the cell to reveal, and does not keep the scroll", async (t) => {
@@ -149,13 +158,31 @@ test("a jump to a match carries the cell to reveal, and does not keep the scroll
   await send({ type: "ready" });
   await indexed();
 
+  const before = of("page").length;
   await send({ type: "gotoMatch", page: 12, row: 1150, column: 1 });
-  const jump = of("page").at(-1);
+  const [jump, below] = of("page").slice(before);
 
   assert.equal(jump.mode, "replace");
   assert.deepEqual(jump.focus, { row: 1150, column: 1 });
   assert.equal(jump.keepScroll, false, "the reveal decides the position, not the old scroll");
   assert.equal(jump.startRow, 1102);
+
+  assert.equal(below.mode, "append", "the page below it fills the screen under the match");
+  assert.equal(below.startRow, 1202);
+  assert.equal(below.focus, null, "only the page holding the match carries the cell to reveal");
+});
+
+test("a jump to the last page of the file has nothing below it to send", async (t) => {
+  const { send, of, indexed } = await openPreview(t, rows(250));
+  await send({ type: "ready" });
+  await indexed();
+
+  const before = of("page").length;
+  await send({ type: "gotoRow", row: 240 });
+  const sent = of("page").slice(before);
+
+  assert.equal(sent.length, 1, "the file ends inside the page the reader jumped to");
+  assert.equal(sent[0].done, true);
 });
 
 test("ordinary paging is neither a jump nor a reveal", async (t) => {

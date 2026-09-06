@@ -678,6 +678,16 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
           focus: focus || null,
           keepScroll: mode === "row",
         });
+        // A jump lands anywhere in its page, including its last row, which
+        // would leave a handful of rows above a blank screen until the reader
+        // scrolled again. The page below it comes with the same answer, so a
+        // jump arrives as a window deep enough to fill the viewport.
+        if (jumped && !page.done) {
+          const below = await serialize(() => document.pageAt(page.pageNumber + 1));
+          if (below && below.rows.length) {
+            post({ type: "page", mode: "append", ...below, focus: null, keepScroll: false });
+          }
+        }
       }
     } catch (error) {
       post({ type: "error", message: error instanceof Error ? error.message : String(error) });
@@ -1615,11 +1625,21 @@ function getLargeFileWebviewHtml() {
     const wanted = rowAtViewportTop();
     const firstRow = Number(rows[0].dataset.rowNumber);
     const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
-    if (wanted >= firstRow && wanted <= lastRow) return;
-    // The answer to that row is already in: asking again would only produce the
-    // same window. Wait for the reader to move rather than loop.
-    if (wanted === lastRequestedRow) return;
-    requestRow(wanted);
+    if (wanted < firstRow || wanted > lastRow) {
+      // The answer to that row is already in: asking again would only produce
+      // the same window. Wait for the reader to move rather than loop.
+      if (wanted === lastRequestedRow) return;
+      requestRow(wanted);
+      return;
+    }
+    // The window holds the row the reader stopped at, but it can end just
+    // below it and leave the rest of the screen blank. Reading on from the
+    // bottom of the window converges: each page ends lower than the last, and
+    // the end of the file stops it. Nothing is fetched above, because the row
+    // they stopped at is the top of the viewport and the rows below it are
+    // what fills the screen.
+    const visible = Math.ceil(byId('table-wrap').clientHeight / rowHeight);
+    if (wanted + visible > lastRow) requestNextPage();
   }
 
   /** Load whichever page holds a row, however far away it is. */

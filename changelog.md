@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Scrolling the read-only preview quickly and stopping no longer leaves most of
+  the screen blank. A jump now arrives as 200 rows — the page holding the row
+  the reader stopped at and the page below it — and a window that still ends
+  above the bottom of the viewport reads on until the screen is covered.
+
 ### Changed
 
 - Pull requests come in four kinds: `Docs:`, `Feature:`, `Fix:` and
