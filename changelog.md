@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.17] - 2026-09-06
+
+### Changed
+
+- The large-file preview loads a window when the scroller stops rather than
+  while it is still moving, so a wheel gesture or a scrollbar drag fetches the
+  place it ends at instead of every window it passes over.
+- The preview reads the whole file, with a progress bar, before it can be
+  scrolled or searched. The row count and page offsets are known before the
+  first gesture, so the scrollbar measures the file from the start. A file that
+  cannot be indexed is still previewed, bounded to the loaded window.
+
 ## [0.0.16] - 2026-09-06
 
 ### Added
