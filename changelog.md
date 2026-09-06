@@ -8,26 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.15] - 2026-09-06
+
 ### Changed
 
+- Searching the large-file preview starts when you press Enter rather than while
+  you are still typing. Typing highlights the rows already on screen and says how
+  many it found there; Enter reads the file, and Enter again walks the results. A
+  half-typed word no longer sends you off to a match for it.
 - The history diff highlights the cells that changed rather than the whole row.
   Rows that were added or removed are still highlighted whole, and a column that
   exists in only one of the two versions is highlighted whole as well. Columns
   are matched by name first, so inserting a column no longer makes every cell of
   every row look changed.
 
-- Searching the large-file preview now starts when you press Enter rather than
-  while you are still typing. Typing highlights the rows already on screen and
-  says how many it found there; Enter reads the file, and Enter again walks the
-  results.
-
 ### Fixed
 
 - Scrolling the preview quickly could leave it loading the same window over and
-  over, flickering between a row count and "Loading…" while the scrollbar
-  refused to settle. The preview now measures where a row actually sits instead
-  of trusting its own arithmetic, and accepts a window that does not cover it
-  rather than asking for it again.
+  over, flickering between a row count and "Loading…" while the scrollbar refused
+  to settle. The preview now measures where a row actually sits instead of
+  trusting its own arithmetic, and accepts a window that does not cover it rather
+  than asking for it again.
+- Comparing two large history versions could ask for a table of one cell per pair
+  of rows. Identical leading and trailing rows are trimmed first, and what remains
+  is compared by position when it is still too large.
 
 ## [0.0.14] - 2026-09-05
 
