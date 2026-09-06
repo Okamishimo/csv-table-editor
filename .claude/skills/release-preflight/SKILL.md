@@ -42,8 +42,11 @@ committing, pushing, creating or merging a PR, tagging, packaging, or publishing
 ## Select the PR type first
 
 - Classify the actual changed files using `scripts/docs-policy.js` and the
-  release rules. Documentation-only work may use `Docs: description`; code,
-  configuration, workflow, or mixed changes require a Release PR.
+  release rules. Documentation-only work may use `Docs: description`. Other work
+  is a `Feature: description` or `Fix: description` PR unless it is the release
+  itself; only `Release vX.Y.Z: description` bumps the version, tags, and
+  publishes. Ask which is intended when the request does not say: a change that
+  need not ship today should not carry a version bump.
 - For an existing or proposed Docs PR, run `node scripts/release-policy.js pr`
   with `PR_TITLE`, `PR_BASE_SHA`, and `PR_HEAD_SHA` provided as environment data.
   Use the actual commits and title, not untrusted title text interpolated into
@@ -55,6 +58,9 @@ committing, pushing, creating or merging a PR, tagging, packaging, or publishing
   release packaging. Its CI needs only the quick checks, and merging must not
   tag or publish. Report readiness for a documentation PR, not for a release.
   The local pre-commit hook still requires full staged verification if committing.
+- For a Feature or Fix PR, skip the version and tag steps too, and leave
+  `package.json` and `package-lock.json` untouched; `PR policy` rejects a bump
+  under those titles. Its CI runs the full suite, and merging creates no tag.
 - Continue through the release-specific steps below only for a Release PR.
 
 ## Check versions, documentation, and existing artifacts

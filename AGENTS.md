@@ -13,11 +13,15 @@ Also read it when answering whether this repository's release automation or
 protection is enabled. It is the canonical workflow policy for this repository;
 apply it together with the editing, testing and release safety rules below.
 
-All changes to `main` go through a PR: `Release vX.Y.Z: description` for releases,
-or `Docs: description` for documentation-only changes. Docs PRs must pass the
-strict file-scope and whitespace quick checks; they do not bump versions, create
-tags, or publish releases. Code, configuration, and workflow changes require a
-Release PR even when mixed with documentation.
+All changes to `main` go through a PR of one of four kinds:
+`Release vX.Y.Z: description` publishes, `Feature: description` and
+`Fix: description` carry ordinary work, and `Docs: description` carries
+documentation only. Docs PRs must pass the strict file-scope and whitespace
+quick checks; every other kind runs full verification. Only a Release PR bumps
+the version, and it must: `PR policy` refuses a Release PR whose `package.json`
+and `package-lock.json` versions match its base, and refuses a Feature or Fix PR
+that moves them. Only a Release PR creates a tag or publishes; Feature and Fix
+work waits on main until a release picks it up.
 Commit verification must pass; do not bypass hooks or push directly to main.
 Detailed rules and the distinction between automatic tagging and GitHub's
 server protection are maintained in the linked file, not duplicated here.
@@ -53,8 +57,6 @@ into the original runtime by `scripts/patch-distribution.js`.
   release lookup, package verification, checksum generation, and publication.
 - `.github/workflows/private-release.yml`: Builds and packages tagged versions,
   then uploads the VSIX and checksum to the private GitHub Release.
-- `.github/workflows/delete-merged-branch.yml`: Deletes a merged PR's head
-  branch. It never checks anything out and never touches the default branch.
 - `src/encoding-detector.js`: BOM, BOM-less UTF-16, strict UTF-8, and scored
   legacy-encoding detection.
 - `src/large-file-guard.js`: Editable-grid size limits and oversized-file

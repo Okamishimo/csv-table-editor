@@ -134,11 +134,59 @@ test("a merged PR tags its exact commit once, retries safely and never tags a la
   assert.equal(mutations.length, 1);
 });
 
-test("PR types require exact Docs or Release prefixes and a nonempty single-line description", () => {
+test("PR types require an exact prefix and a nonempty single-line description", () => {
   assert.equal(prKind("Docs: clarify the release guide"), "docs");
+  assert.equal(prKind("Feature: column-scoped search"), "feature");
+  assert.equal(prKind("Fix: stop the preview flickering"), "fix");
   assert.equal(prKind("Release v0.0.16: code changes"), "release");
-  for (const title of ["Docs:", "Docs: ", "docs: x", "Docs:x", "Docs: x\ncode", "Docs: x\r", "Documentation: x", "Release v0.0.016: x"]) {
+  for (const title of ["Docs:", "Docs: ", "docs: x", "Docs:x", "Docs: x\ncode", "Docs: x\r", "Documentation: x",
+    "Release v0.0.016: x", "Feature:", "Feature: ", "feature: x", "Feature:x", "Feature: x\ny",
+    "Fix:", "fix: x", "Fixes: x", "Fix: x\ny", "Prefix Fix: x"]) {
     assert.throws(() => prKind(title), /PR title must/);
+  }
+});
+
+test("only a release PR moves the version, and it must move all three fields", () => {
+  const base = "a".repeat(40);
+  const head = "b".repeat(40);
+  // Versions this fake repository reports for each commit.
+  const at = { [base]: { version: "0.0.15" }, [head]: { version: "0.0.15" } };
+  const git = (args) => {
+    if (args[0] === "rev-parse") throw Object.assign(new Error("missing tag"), { status: 1 });
+    assert.equal(args[0], "show");
+    const [sha, file] = args[1].split(":");
+    const version = at[sha].version;
+    return JSON.stringify(file === "package.json"
+      ? { version } : { version, packages: { "": { version } } });
+  };
+
+  // Feature and Fix leave the version alone, and never look up a tag.
+  assert.deepEqual(checkPr("Feature: add a thing", base, head, git), { kind: "feature" });
+  assert.deepEqual(checkPr("Fix: correct a thing", base, head, git), { kind: "fix" });
+
+  // A release PR that forgot the bump is refused before anything else.
+  assert.throws(() => checkPr("Release v0.0.15: no bump", base, head, git),
+    /must change the version in package.json and package-lock.json/);
+
+  at[head] = { version: "0.0.16" };
+  assert.deepEqual(checkPr("Release v0.0.16: bumped", base, head, git), { kind: "release", tag: "v0.0.16" });
+  for (const title of ["Feature: sneak a bump in", "Fix: sneak a bump in"]) {
+    assert.throws(() => checkPr(title, base, head, git), /Only a release PR may change the version/);
+  }
+});
+
+test("a merged feature or fix PR makes no tag API call or version lookup", () => {
+  const repository = "Okamishimo/csv-table-editor";
+  const commit = "a".repeat(40);
+  const git = (args) => {
+    assert.ok(["rev-parse", "merge-base"].includes(args[0]), "an unpublished merge must not read versions or tags");
+    return commit;
+  };
+  for (const [title, kind] of [["Feature: add a thing", "feature"], ["Fix: correct a thing", "fix"]]) {
+    const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
+      title, merge_commit_sha: commit };
+    assert.deepEqual(tagMergedPr(pr, repository, git, () => assert.fail("only a release may create a tag")),
+      { kind, tag: "", commit });
   }
 });
 
@@ -168,6 +216,7 @@ test("release PR checks still require a newer matching version and an unused tag
     }
     assert.equal(args[0], "show");
     if (args[1] === `${base}:package.json`) return JSON.stringify({ version: "0.0.15" });
+    if (args[1] === `${base}:package-lock.json`) return JSON.stringify({ version: "0.0.15", packages: { "": { version: "0.0.15" } } });
     return JSON.stringify(args[1] === `${head}:package.json` ? manifest : lock);
   };
   assert.deepEqual(checkPr("Release v0.0.16: x", base, head, git), { kind: "release", tag: "v0.0.16" });
@@ -189,20 +238,14 @@ test("workflow wiring validates ancestry before publication and calls release ex
   assert.match(merge, /needs: tag/);
   assert.match(merge, /if: needs.tag.outputs.kind == 'release'/);
   assert.match(merge, /kind: \$\{\{ steps.tag.outputs.kind \}\}/);
-  const deletion = read("delete-merged-branch.yml");
-  assert.match(deletion, /types: \[closed\]/);
-  assert.match(deletion, /github.event.pull_request.merged == true/);
-  assert.match(deletion, /head.repo.full_name == github.repository/);
-  assert.doesNotMatch(deletion, /actions\/checkout/, "deleting a ref needs no working tree");
-  assert.doesNotMatch(deletion, /\$\{\{ github.event.pull_request.head.ref \}\}"/,
-    "a branch name reaches the script as data, never interpolated into it");
   assert.match(read("pull-request.yml"), /reopened, edited/);
   assert.match(read("pull-request.yml"), /run: npm run verify/);
   const verify = read("pull-request.yml").split("  verify:\n")[1];
   assert.match(verify, /needs: policy/);
   assert.match(verify, /if: needs.policy.outputs.kind == 'docs'/);
   for (const step of verify.split(/\n      - /).slice(1)) {
-    assert.match(step, /if: needs.policy.outputs.kind == '(?:docs|release)'/);
-    if (/npm ci|npm run verify|actions\//.test(step)) assert.match(step, /if: needs.policy.outputs.kind == 'release'/);
+    assert.match(step, /if: needs.policy.outputs.kind (?:==|!=) 'docs'/);
+    // Only documentation skips the suite; Feature, Fix and Release all run it.
+    if (/npm ci|npm run verify|actions\//.test(step)) assert.match(step, /if: needs.policy.outputs.kind != 'docs'/);
   }
 });
