@@ -40,25 +40,26 @@ const settle = (window) =>
   new Promise((resolve) => window.setTimeout(resolve, SCROLL_SETTLE_MS + 60));
 
 /**
- * The matches the host's scan would report for the rows a test has loaded,
- * in the order the scan reports them: from `fromRow` down, then wrapping.
+ * The one match the host would report for a request: the first at or after
+ * `fromRow`/`fromColumn`, among the rows a test has loaded. The host reads the
+ * file downward and stops there, so a request is answered with a match or with
+ * nothing at all.
  */
-function scanMatches(document, query, { column = -1, fromRow = 0 } = {}) {
+function firstMatch(document, query, { column = -1, fromRow = 0, fromColumn = 0 } = {}) {
   const needle = query.toLowerCase();
-  const ahead = [];
-  const wrapped = [];
   for (const row of document.getElementById("rows").rows) {
     const rowNumber = Number(row.dataset.rowNumber);
+    if (rowNumber < fromRow) continue;
     const page = Number(row.dataset.pageNumber);
     const first = column >= 0 ? column : 0;
     const last = column >= 0 ? column + 1 : row.cells.length - 1;
-    for (let c = first; c < last; c++) {
+    for (let c = rowNumber === fromRow ? Math.max(first, fromColumn) : first; c < last; c++) {
       const cell = row.cells[c + 1];
       if (!cell || !cell.textContent.toLowerCase().includes(needle)) continue;
-      (rowNumber >= fromRow ? ahead : wrapped).push({ r: rowNumber, c, p: page });
+      return [{ r: rowNumber, c, p: page }];
     }
   }
-  return ahead.concat(wrapped);
+  return [];
 }
 
 /** Answer the webview's latest whole-file search the way the host would. */
@@ -70,10 +71,16 @@ function answerSearch(postedMessages, send, matches, options = {}) {
     query: request.query,
     matches,
     done: options.done !== false,
-    truncated: options.truncated === true,
     scannedRows: options.scannedRows === undefined ? 200 : options.scannedRows,
   });
   return request;
+}
+
+/** Answer it by reading the loaded rows, the way the host reads the file. */
+function answerFromRows(document, postedMessages, send, options = {}) {
+  const request = postedMessages.filter((message) => message.type === "searchFile").at(-1);
+  assert.ok(request, "the webview must ask the host to search the file");
+  return answerSearch(postedMessages, send, firstMatch(document, request.query, request), options);
 }
 
 /** Click the element matching a selector, the way the reader would. */
@@ -179,12 +186,9 @@ test("loading pages refreshes search matches without scrolling back to the curre
   await new Promise((resolve) => window.setTimeout(resolve, 175));
   // Typing only paints; Enter is what reads the file.
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  // The host reports every match in the file, including rows not loaded yet.
-  answerSearch(postedMessages, send, [
-    { r: 102, c: 0, p: 2 }, { r: 103, c: 0, p: 2 },
-    { r: 202, c: 0, p: 3 }, { r: 2, c: 0, p: 1 },
-  ]);
+  answerFromRows(document, postedMessages, send);
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  answerFromRows(document, postedMessages, send);
   const scrollCount = scrolledCells.length;
   for (const mode of ["append", "prepend"]) {
     send({ ...page, mode, rows: [["Alice"]], pageNumber: mode === "append" ? 3 : 1,
@@ -193,10 +197,13 @@ test("loading pages refreshes search matches without scrolling back to the curre
   }
   assert.equal(document.querySelectorAll("td.match").length, 4);
   assert.equal(document.querySelectorAll("td.match-current").length, 1);
-  assert.equal(document.getElementById("filter-count").textContent, "2/4 results");
+  assert.equal(document.getElementById("filter-count").textContent, "Result 2 · Enter for the next");
+  // Reading on reaches the page that has just been appended.
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  answerFromRows(document, postedMessages, send);
   assert.equal(scrolledCells.length, scrollCount + 1, "explicit match navigation still scrolls");
-  assert.equal(document.getElementById("filter-count").textContent, "3/4 results");
+  assert.equal(document.querySelector("td.match-current").parentElement.dataset.rowNumber, "202");
+  assert.equal(document.getElementById("filter-count").textContent, "Result 3 · Enter for the next");
 });
 
 test("preview cell clicks highlight both axes with bounded DOM changes and one stylesheet rule", (t) => {
@@ -314,9 +321,9 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     await new Promise((resolve) => window.setTimeout(resolve, 175));
     // Typing only paints; Enter is what reads the file.
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    answerSearch(postedMessages, send,
-      scanMatches(document, "Alice", { column: scoped ? 0 : -1, fromRow: 2 }));
+    answerFromRows(document, postedMessages, send);
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    answerFromRows(document, postedMessages, send);
     const matches = Array.from(document.querySelectorAll("td.match"));
     assert.equal(matches.length, scoped ? 2 : 3);
     const current = document.querySelector("td.match-current");
@@ -327,7 +334,7 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     tableWrap.scrollLeft = 40;
     click(rows[0].cells[1]);
     // Cancelling the scope is a different result set, so the file is read again.
-    if (scoped) answerSearch(postedMessages, send, scanMatches(document, "Alice", { fromRow: 2 }));
+    if (scoped) answerFromRows(document, postedMessages, send);
     assert.equal(document.querySelectorAll(".search-column").length, 0, "even clicking the scoped column cancels its whole-column selection");
     const expectedCurrent = scoped ? rows[0].cells[1] : current;
     const expectedIndex = scoped ? 1 : 2;
@@ -341,19 +348,30 @@ test("preview cell clicks cancel column scope once and preserve whole-window sea
     assert.deepEqual(Array.from(document.querySelectorAll("td.match")),
       [rows[0].cells[1], rows[0].cells[2], rows[1].cells[1]], "search includes matches outside the cancelled scope");
     assert.equal(document.querySelector("td.match-current"), expectedCurrent);
-    assert.equal(document.getElementById("filter-count").textContent, `${expectedIndex}/3 results`);
+    assert.equal(document.getElementById("filter-count").textContent,
+      `Result ${expectedIndex} · Enter for the next`);
     assert.equal(scrolledCells.length, scrollBefore);
     assert.equal(tableWrap.scrollTop, 120);
     assert.equal(tableWrap.scrollLeft, 40);
     assert.equal(rows[1].cells[2].classList.contains("highlighted-cell"), true);
     assert.deepEqual(postedMessages.filter((message) => message.type === "searchFile")
-      .map((message) => message.column), scoped ? [0, -1] : [-1],
-      "only a scope change starts another scan");
+      .map((message) => message.column), scoped ? [0, 0, -1] : [-1, -1],
+      "reading on continues the search; only a scope change starts it over");
+    // Settle both cases the same way: the scoped one has read on to the end of
+    // the file, the unscoped one still has the match after this one in hand.
+    if (scoped) {
+      filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      answerSearch(postedMessages, send, []);
+      assert.equal(document.getElementById("filter-count").textContent, "Result 1 · no more below");
+    }
     for (const modifier of ["ctrlKey", "metaKey"]) {
       window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", [modifier]: true, bubbles: true }));
       assert.equal(document.activeElement, filter);
+      // Shift+Enter walks back through what this search has already found; at
+      // the first of them there is nowhere further back to go.
       filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
-      assert.equal(document.getElementById("filter-count").textContent, `${scoped ? 3 : 1}/3 results`);
+      assert.equal(document.getElementById("filter-count").textContent,
+        scoped ? "Result 1 · no more below" : "Result 1 · Enter for the next");
       filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       assert.equal(document.querySelector("td.match-current"), expectedCurrent);
     }
@@ -433,14 +451,14 @@ test("row highlighting preserves whole-window and column-scoped search results a
     await new Promise((resolve) => window.setTimeout(resolve, 175));
     // Typing only paints; Enter is what reads the file.
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    answerSearch(postedMessages, (data) =>
-      window.dispatchEvent(new window.MessageEvent("message", { data })),
-      scanMatches(document, "Alice", { column: columnIndex === null ? -1 : columnIndex, fromRow: 2 }));
+    const send = (data) => window.dispatchEvent(new window.MessageEvent("message", { data }));
+    answerFromRows(document, postedMessages, send);
     const expectedCount = columnIndex === null ? 3 : 2;
     const matches = Array.from(document.querySelectorAll("td.match"));
     assert.equal(matches.length, expectedCount);
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    assert.equal(document.getElementById("filter-count").textContent, `2/${expectedCount} results`);
+    answerFromRows(document, postedMessages, send);
+    assert.equal(document.getElementById("filter-count").textContent, "Result 2 · Enter for the next");
     const current = document.querySelector("td.match-current");
     const scope = document.getElementById("search-scope").textContent;
     const placeholder = filter.placeholder;
@@ -455,17 +473,19 @@ test("row highlighting preserves whole-window and column-scoped search results a
     assert.equal(filter.disabled, false, "row highlighting never disables search");
     assert.deepEqual(Array.from(document.querySelectorAll("td.match")), matches);
     assert.equal(document.querySelector("td.match-current"), current);
-    assert.equal(document.getElementById("filter-count").textContent, `2/${expectedCount} results`);
+    assert.equal(document.getElementById("filter-count").textContent, "Result 2 · Enter for the next");
     assert.equal(scrollCount, scrollBefore, "highlighting must not rerun search or move to a match");
     assert.equal(rows[1].classList.contains("highlighted-row"), true);
     window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
     assert.equal(document.activeElement, filter);
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
-    assert.equal(document.getElementById("filter-count").textContent, `1/${expectedCount} results`);
+    assert.equal(document.getElementById("filter-count").textContent, "Result 1 · Enter for the next");
     filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    assert.equal(document.querySelector("td.match-current"), current);
-    assert.deepEqual(postedMessages.map((message) => message.type), ["ready", "searchFile"],
-      "row highlighting never starts another scan");
+    assert.equal(document.querySelector("td.match-current"), current,
+      "walking back and forth stays inside what the search already found");
+    assert.deepEqual(postedMessages.map((message) => message.type),
+      ["ready", "searchFile", "searchFile"],
+      "row highlighting never starts another read; only the two Enters did");
   }
 });
 
@@ -543,15 +563,18 @@ test("large-file webview is read-only, searches loaded rows and automatically ap
   await new Promise((resolve) => window.setTimeout(resolve, 175));
   // Typing only paints; Enter is what reads the file.
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  answerSearch(postedMessages, send, scanMatches(document, "Alice", { fromRow: 2 }));
+  answerFromRows(document, postedMessages, send);
   assert.equal(document.querySelectorAll("#rows td.match").length, 2);
-  assert.equal(document.getElementById("filter-count").textContent, "1/2 results");
+  assert.equal(document.getElementById("filter-count").textContent, "Result 1 · Enter for the next");
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.equal(document.getElementById("filter-count").textContent, "2/2 results");
+  answerFromRows(document, postedMessages, send);
+  assert.equal(document.getElementById("filter-count").textContent, "Result 2 · Enter for the next");
+  assert.equal(document.querySelector("td.match-current").parentElement.dataset.rowNumber, "3");
   filter.dispatchEvent(new window.KeyboardEvent("keydown", {
     key: "Enter", shiftKey: true, bubbles: true,
   }));
-  assert.equal(document.getElementById("filter-count").textContent, "1/2 results");
+  assert.equal(document.getElementById("filter-count").textContent, "Result 1 · Enter for the next");
+  assert.equal(document.querySelector("td.match-current").parentElement.dataset.rowNumber, "2");
 
   const cityColumn = document.querySelector('thead th[data-column-index="1"]');
   cityColumn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
@@ -850,15 +873,15 @@ test("typing highlights what is on screen; Enter is what reads the file", async 
 
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
-    { type: "searchFile", query: "Alice", column: -1, fromRow: 302, fromPage: 4, firstOnly: true },
-    "the scan starts at the first loaded row so results continue from here");
+    { type: "searchFile", query: "Alice", column: -1, fromRow: 302, fromColumn: 0, fromPage: 4 },
+    "the read starts at the first loaded row, so it continues from here");
 
   // Scoping to a column restarts the scan for that column only.
   click(document, window, 'thead th[data-column-index="1"]');
   assert.equal(postedMessages.at(-1).column, 1);
 });
 
-test("Enter walks the results once the file has been read", async (t) => {
+test("Enter reads on down the file, and Shift+Enter walks back through what it found", async (t) => {
   const { window, document, send, postedMessages } = openPreview(t);
   send({ type: "page", mode: "replace", header: ["Name"], rows: [["Alice"], ["Alice"]],
     pageNumber: 1, startRow: 2, endRow: 3, done: true, truncatedCells: 0, truncatedColumns: false });
@@ -870,15 +893,34 @@ test("Enter walks the results once the file has been read", async (t) => {
   const press = (shift) => filter.dispatchEvent(
     new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: shift, bubbles: true }));
   const count = document.getElementById("filter-count");
+  const reads = () => postedMessages.filter((message) => message.type === "searchFile");
 
   press(false);
-  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }]);
-  assert.equal(count.textContent, "1/2 results", "the first Enter runs the search");
+  answerFromRows(document, postedMessages, send);
+  assert.equal(count.textContent, "Result 1 · Enter for the next", "the first Enter runs the search");
 
   press(false);
-  assert.equal(count.textContent, "2/2 results", "the next walks the results");
-  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 1,
-    "walking the results does not read the file again");
+  assert.deepEqual(JSON.parse(JSON.stringify(reads().at(-1))),
+    { type: "searchFile", query: "Alice", column: -1, fromRow: 2, fromColumn: 1, fromPage: 1 },
+    "the next Enter reads on from the cell after the match, so it cannot find it again");
+  answerFromRows(document, postedMessages, send);
+  assert.equal(count.textContent, "Result 2 · Enter for the next");
+  assert.equal(document.querySelector("td.match-current").parentElement.dataset.rowNumber, "3");
+
+  // The file ends here, and the search stops there rather than wrapping.
+  press(false);
+  assert.equal(reads().length, 3);
+  answerSearch(postedMessages, send, []);
+  assert.equal(count.textContent, "Result 2 · no more below");
+  press(false);
+  assert.equal(reads().length, 3, "there is nothing below to read for a second time");
+
+  press(true);
+  assert.equal(count.textContent, "Result 1 · Enter for the next", "Shift+Enter goes back");
+  assert.equal(document.querySelector("td.match-current").parentElement.dataset.rowNumber, "2");
+  assert.equal(reads().length, 3, "walking back reads nothing: those matches are already in hand");
+  press(true);
+  assert.equal(count.textContent, "Result 1 · Enter for the next", "and stops at the first of them");
 
   // Editing the query makes the next Enter a new search.
   filter.value = "Alicia";
@@ -887,8 +929,9 @@ test("Enter walks the results once the file has been read", async (t) => {
   assert.match(count.textContent, /Enter to search the file/,
     "results for the old query are not shown for the new one");
   press(false);
-  assert.equal(postedMessages.filter((m) => m.type === "searchFile").length, 2);
+  assert.equal(reads().length, 4);
   assert.equal(postedMessages.at(-1).query, "Alicia");
+  assert.equal(postedMessages.at(-1).fromColumn, 0, "a new query starts at the visible row, not mid-row");
 });
 
 test("clearing the query calls off a running scan exactly once", async (t) => {
@@ -932,14 +975,18 @@ test("progress is shown while the file is still being read", async (t) => {
   answerSearch(postedMessages, send, [], { done: false, scannedRows: 120000 });
   assert.equal(count.textContent, "Searching… 120,000 rows");
 
-  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }], { done: false, scannedRows: 300000 });
-  assert.equal(count.textContent, "1/1 results · searching… 300,000 rows");
+  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }], { done: true, scannedRows: 300000 });
+  assert.equal(count.textContent, "Result 1 · Enter for the next");
 
-  answerSearch(postedMessages, send, [{ r: 900, c: 0, p: 10 }], { done: true, scannedRows: 400000 });
-  assert.equal(count.textContent, "1/2 results");
+  // Reading on for the next one reports its own progress, without losing the
+  // match the reader is standing on.
+  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  answerSearch(postedMessages, send, [], { done: false, scannedRows: 150000 });
+  assert.equal(count.textContent, "Result 1 · searching… 150,000 rows");
 
-  answerSearch(postedMessages, send, [], { done: true, truncated: true, scannedRows: 400000 });
-  assert.match(count.textContent, /\/2\+ results$/, "a capped scan says the total is a floor");
+  answerSearch(postedMessages, send, [], { done: true, scannedRows: 900000 });
+  assert.equal(count.textContent, "Result 1 · no more below",
+    "a read that reaches the end of the file says so rather than starting again");
 });
 
 test("results from a superseded query are ignored", async (t) => {
@@ -975,7 +1022,7 @@ test("a match outside the loaded window loads its page and is revealed there", a
   answerSearch(postedMessages, send, [{ r: 5002, c: 0, p: 51 }]);
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
     { type: "gotoMatch", page: 51, row: 5002, column: 0 });
-  assert.equal(document.getElementById("filter-count").textContent, "1/1 results");
+  assert.equal(document.getElementById("filter-count").textContent, "Result 1 · Enter for the next");
 
   const scrollsBefore = scrolledCells.length;
   send({ type: "page", mode: "replace", header: ["Name"], rows: [["needle"], ["plain"]],
@@ -987,10 +1034,10 @@ test("a match outside the loaded window loads its page and is revealed there", a
   assert.equal(current.textContent, "needle");
   assert.equal(current.parentElement.dataset.rowNumber, "5002");
   assert.equal(scrolledCells.length, scrollsBefore + 1, "the reader is taken to it");
-  assert.equal(document.getElementById("filter-count").textContent, "1/1 results");
+  assert.equal(document.getElementById("filter-count").textContent, "Result 1 · Enter for the next");
 });
 
-test("navigation wraps from the last match back to the first", async (t) => {
+test("navigation stops at the end of the file instead of wrapping to the top", async (t) => {
   const { window, document, send, postedMessages } = openPreview(t);
   send({ type: "page", mode: "replace", header: ["Name"], rows: [["needle"], ["needle"]],
     pageNumber: 1, startRow: 2, endRow: 3, done: false, truncatedCells: 0, truncatedColumns: false });
@@ -1000,24 +1047,38 @@ test("navigation wraps from the last match back to the first", async (t) => {
   await new Promise((resolve) => window.setTimeout(resolve, 175));
   // Typing only paints; Enter is what reads the file.
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  // Two matches here, one far below: the scan reports them in reading order.
-  answerSearch(postedMessages, send,
-    [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }, { r: 900, c: 0, p: 10 }]);
+  answerFromRows(document, postedMessages, send);
 
   const count = document.getElementById("filter-count");
-  assert.equal(count.textContent, "1/3 results");
   const next = () => filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(count.textContent, "Result 1 · Enter for the next");
 
   next();
-  assert.equal(count.textContent, "2/3 results");
-  next();
-  assert.equal(count.textContent, "3/3 results");
-  assert.equal(postedMessages.at(-1).type, "gotoMatch", "the third match is on another page");
-  next();
-  assert.equal(count.textContent, "1/3 results", "past the end, navigation wraps to the first match");
+  answerFromRows(document, postedMessages, send);
+  assert.equal(count.textContent, "Result 2 · Enter for the next");
 
-  filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
-  assert.equal(count.textContent, "3/3 results", "and backwards from the first to the last");
+  // The third match is far below, on a page the reader has never seen.
+  next();
+  answerSearch(postedMessages, send, [{ r: 900, c: 0, p: 10 }]);
+  assert.equal(count.textContent, "Result 3 · Enter for the next");
+  assert.equal(postedMessages.at(-1).type, "gotoMatch", "its page is loaded to show it");
+
+  next();
+  answerSearch(postedMessages, send, []);
+  assert.equal(count.textContent, "Result 3 · no more below");
+  const messages = postedMessages.length;
+  next();
+  assert.equal(postedMessages.length, messages,
+    "past the end there is nothing to ask for and nothing above to wrap to");
+
+  const back = () => filter.dispatchEvent(
+    new window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+  back();
+  back();
+  assert.equal(count.textContent, "Result 1 · Enter for the next");
+  back();
+  assert.equal(count.textContent, "Result 1 · Enter for the next",
+    "and backwards from the first there is nowhere to wrap to either");
 });
 
 const ROW_HEIGHT = 20;
@@ -1400,8 +1461,8 @@ test("the counter says what is on screen until the file has actually been read",
   await new Promise((resolve) => window.setTimeout(resolve, 175));
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.equal(count.textContent, "Searching… 0 rows", "now it is genuinely reading the file");
-  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }]);
-  assert.equal(count.textContent, "1/2 results");
+  answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }]);
+  assert.equal(count.textContent, "Result 1 · Enter for the next");
 });
 
 test("preview search starts at the visible row rather than the first cached row", (t) => {
@@ -1423,8 +1484,8 @@ test("preview search starts at the visible row rather than the first cached row"
   input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   const request = postedMessages.at(-1);
   assert.equal(request.fromRow, 342);
+  assert.equal(request.fromColumn, 0);
   assert.equal(request.fromPage, 4);
-  assert.equal(request.firstOnly, true);
   const requests = postedMessages.length;
   document.querySelector('#rows tr th').click();
   assert.equal(postedMessages.length, requests, "row-number clicks do not restart or scope search");

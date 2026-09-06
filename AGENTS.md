@@ -228,13 +228,24 @@ Large-file protections are correctness requirements, not optional tuning.
 - A running scan may show the pages it passes, so the reader can see how far it
   has reached. Following ends the moment the reader scrolls, a result is
   revealed, or the scan finishes; it must never fight them for the viewport.
-- Preview search covers the whole file, not the loaded window. The host streams
-  the file and reports matches as it finds them, starting at the reader's first
-  loaded row and wrapping at the end, so every row is examined exactly once.
-  Keep the match count bounded and say when it was capped.
+- Preview search covers the whole file, not the loaded window, and it reads
+  downward. The host streams the file from the page the reader is looking at and
+  stops at the first match at or after it; there is no wrap. A file is not a
+  result set to be collected: a common word matches millions of rows, so the
+  reader is answered one match at a time and no total is claimed. Reading on
+  resumes in the cell after the match reported last, which is what keeps every
+  row between one match and the next examined exactly once.
+- Reaching a page directly needs the file index. A preview whose index failed
+  has none, so a read that cannot start where the reader is starts at the
+  beginning of the file and walks forwards instead of finding nothing. It still
+  reports nothing above the reader.
 - Typing only highlights the rows already on screen. Reading the file is what
-  Enter does, and a later Enter walks the results it found. A half-typed word
-  must never send the reader off to a match for it.
+  Enter does, and a later Enter reads on for the next match below. A half-typed
+  word must never send the reader off to a match for it.
+- The matches a search has already reached are kept, so Shift+Enter walks back
+  through them and Enter forward again without reading anything a second time.
+  Past the newest one Enter reads on; past the end of the file it stops, and
+  says so, rather than starting the file again.
 - The pager owns one forward stream, so a running scan and the reader's
   scrolling must take turns. Do not let them interleave.
 - Only a search the reader asked for may move them. Results arriving on their

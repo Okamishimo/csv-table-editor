@@ -109,8 +109,11 @@ come to rest.
 
 Typing highlights the rows already loaded. Press **Enter** to search downward
 from the first visible row, continuing beyond the loaded window and stopping at
-the first matching cell. The preview jumps to that result and does not wrap to
-the top of the file. Clicking a column header limits the search to that column.
+the first matching cell; the preview loads that part of the file and jumps to
+it. Enter again reads on for the next match below, and **Shift+Enter** walks
+back through the ones already found. The search never wraps to the top of the
+file: at the end it says so and stays there. Clicking a column header limits the
+search to that column.
 Loading adjacent pages keeps the visible record at the same screen position,
 including when older rows leave the window or a search is active.
 

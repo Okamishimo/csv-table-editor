@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.18] - 2026-09-06
+
 ### Fixed
 
 - Rapid saves no longer overwrite each other's history index entries. Each
@@ -15,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adjacent changed rows in history comparisons align one for one, preserving
   cell-level highlights for multiple edits.
 - Read-only preview searches begin at the first visible row and continue
-  downward, stopping at the first match without restarting from the top.
+  downward, stopping at the first match without restarting from the top. Enter
+  reads on for the next match below and Shift+Enter walks back through the ones
+  already found; previously a second Enter could never leave the first match.
 
 ### Added
 

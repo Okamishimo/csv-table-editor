@@ -22,10 +22,7 @@ const MAX_PREVIEW_COLUMNS = 100;
 const MAX_PREVIEW_CELL_CHARS = 4_096;
 const MAX_PREVIEW_ROW_CHARS = 32_768;
 const EDITABLE_OVERRIDES = new Set();
-/** Positions kept for one whole-file search. Enough to navigate, bounded so a
- *  query matching most of a multi-gigabyte file cannot exhaust the host. */
-const SEARCH_MATCH_LIMIT = 20000;
-/** How often a running scan reports what it has found so far. */
+/** How often a running scan says how far down the file it has read. */
 const SEARCH_REPORT_ROWS = 4000;
 /** How often a running scan shows the reader the page it is looking at. */
 const SCAN_FOLLOW_INTERVAL_MS = 200;
@@ -524,14 +521,15 @@ class StreamingCsvParser {
 }
 
 /**
- * Walk the whole file for a query, reporting matches as they are found.
+ * Read the file downward for the next cell matching a query.
  *
- * Matches at or after `fromRow` are reported first, in file order, so
- * navigation continues from where the reader is. The ones before it are held
- * back and reported at the end, which is the wrap around the end of the file.
- * Either way the scan covers every row exactly once.
+ * The reader is answered one match at a time. The scan starts at the page they
+ * are looking at, skips whatever is above `fromRow`/`fromColumn`, and stops at
+ * the first cell that matches; it never wraps. Asking again from the match
+ * reported last therefore walks the file forwards, examining each row between
+ * one match and the next exactly once and never re-reading what is behind.
  *
- * Pages the scan passes are cached by the pager, so jumping to any match it
+ * Pages the scan passes are cached by the pager, so jumping to the match it
  * reported never re-reads the file.
  */
 async function searchLargeFile(document, request, hooks) {
@@ -539,89 +537,59 @@ async function searchLargeFile(document, request, hooks) {
   if (!needle) return;
   const column = Number.isInteger(request.column) && request.column >= 0 ? request.column : -1;
   const fromRow = Number.isFinite(request.fromRow) ? Number(request.fromRow) : 0;
+  // Where to resume within `fromRow`: continuing from a match must not answer
+  // with that same match again.
+  const fromColumn = Number.isInteger(request.fromColumn) && request.fromColumn > 0
+    ? request.fromColumn : 0;
+  // pageAt seeks straight to a page through the file index, so the pages behind
+  // the reader are never read only to be thrown away.
+  const fromPage = Number.isInteger(request.fromPage) && request.fromPage > 0
+    ? request.fromPage : Math.max(1, Math.floor((fromRow - 2) / PAGE_ROWS) + 1);
 
-  // The preview asks for only the next match, starting at the visible page.
-  // pageAt uses the file index to seek directly; do not scan earlier pages just
-  // to reorder their results later. No wrap: this request searches downward.
-  if (request.firstOnly) {
-    const fromPage = Number.isInteger(request.fromPage) && request.fromPage > 0
-      ? request.fromPage : Math.max(1, Math.floor((fromRow - 2) / PAGE_ROWS) + 1);
-    let scannedRows = 0;
-    for (let pageNumber = fromPage;; pageNumber++) {
-      if (hooks.cancelled()) return;
-      const page = await hooks.serialize(() => document.pageAt(pageNumber));
-      if (hooks.cancelled()) return;
-      if (!page) break;
-      if (hooks.onPage) hooks.onPage(page);
-      for (const [index, row] of page.rows.entries()) {
-        const r = page.startRow + index;
-        if (r < fromRow) continue;
-        scannedRows++;
-        const first = column >= 0 ? column : 0;
-        const last = column >= 0 ? Math.min(column + 1, row.length) : row.length;
-        for (let c = first; c < last; c++) {
-          if (row[c] == null || !String(row[c]).toLocaleLowerCase().includes(needle)) continue;
-          hooks.report({ matches: [{ r, c, p: page.pageNumber }], done: true,
-            total: 1, truncated: false, scannedRows });
-          return;
-        }
-      }
-      if (page.done) break;
-      hooks.report({ matches: [], done: false, total: 0, truncated: false, scannedRows });
-    }
-    if (!hooks.cancelled()) hooks.report({ matches: [], done: true, total: 0, truncated: false, scannedRows });
-    return;
-  }
-
-  const wrapped = [];
-  let ahead = [];
-  let total = 0;
   let scannedRows = 0;
   let rowsSinceReport = 0;
-  let truncated = false;
 
-  const report = (done) => {
-    const matches = ahead;
-    ahead = [];
-    rowsSinceReport = 0;
-    hooks.report({ matches, done, total, truncated, scannedRows });
-  };
-
-  for (let pageNumber = 1; !truncated; pageNumber++) {
+  for (let pageNumber = fromPage;; pageNumber++) {
     if (hooks.cancelled()) return;
-    const page = await hooks.serialize(() => document.pageAt(pageNumber));
+    let page = await hooks.serialize(() => document.pageAt(pageNumber));
+    if (hooks.cancelled()) return;
+    if (!page && pageNumber === fromPage && fromPage > 1) {
+      // Reaching a page directly needs the file index. A file that could not be
+      // indexed has none, so the read starts at the beginning and walks
+      // forwards instead of finding nothing; the rows above the reader are
+      // still skipped rather than reported.
+      pageNumber = 1;
+      page = await hooks.serialize(() => document.pageAt(pageNumber));
+      if (hooks.cancelled()) return;
+    }
     if (!page) break;
     if (hooks.onPage) hooks.onPage(page);
 
     for (const [index, row] of page.rows.entries()) {
       const rowNumber = page.startRow + index;
+      if (rowNumber < fromRow) continue;
+      scannedRows++;
+      rowsSinceReport++;
       const first = column >= 0 ? column : 0;
       const last = column >= 0 ? Math.min(column + 1, row.length) : row.length;
-      for (let c = first; c < last; c++) {
+      for (let c = rowNumber === fromRow ? Math.max(first, fromColumn) : first; c < last; c++) {
         const value = row[c];
         if (value == null || !String(value).toLocaleLowerCase().includes(needle)) continue;
-        total++;
-        if (total > SEARCH_MATCH_LIMIT) { truncated = true; break; }
-        const match = { r: rowNumber, c: c, p: page.pageNumber };
-        if (rowNumber >= fromRow) ahead.push(match);
-        else wrapped.push(match);
+        hooks.report({ matches: [{ r: rowNumber, c: c, p: page.pageNumber }], done: true, scannedRows });
+        return;
       }
-      if (truncated) break;
     }
 
-    scannedRows += page.rows.length;
-    rowsSinceReport += page.rows.length;
-    // Report often enough that the reader can jump to an early match while the
-    // rest of the file is still being read.
-    if (!truncated && (ahead.length > 0 || rowsSinceReport >= SEARCH_REPORT_ROWS)) report(false);
     if (page.done) break;
+    // A long search must not look stuck, so say how far it has read.
+    if (rowsSinceReport >= SEARCH_REPORT_ROWS) {
+      rowsSinceReport = 0;
+      hooks.report({ matches: [], done: false, scannedRows });
+    }
   }
 
-  if (hooks.cancelled()) return;
-  if (truncated) total = SEARCH_MATCH_LIMIT;
-  // The wrap: everything above where the reader started, in file order.
-  ahead = ahead.concat(wrapped);
-  report(true);
+  // Nothing below: the reader is told so rather than being sent to the top.
+  if (!hooks.cancelled()) hooks.report({ matches: [], done: true, scannedRows });
 }
 
 async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
@@ -747,7 +715,7 @@ async function resolveLargeFileEditor(document, panel, vscode, encodingApi) {
     } catch (error) {
       if (token !== searchToken) return;
       post({ type: "error", message: error instanceof Error ? error.message : String(error) });
-      post({ type: "searchMatches", query: message.query, matches: [], done: true, total: 0, truncated: false, scannedRows: 0 });
+      post({ type: "searchMatches", query: message.query, matches: [], done: true, scannedRows: 0 });
     }
   };
 
@@ -1031,14 +999,17 @@ function getLargeFileWebviewHtml() {
   let highlightedColumnRule = null;
   let matches = [];
   let currentMatchCell = null;
-  /** Whole-file matches in the order navigation visits them: from where the
-   *  reader was when the search started, down to the end, then wrapping to the
-   *  top. The host streams them in as it reads the file. */
+  /** The whole-file matches this search has reached so far, in file order:
+   *  the host answers one at a time, downward from where the reader was, and
+   *  each one is kept so Enter and Shift+Enter can walk what was already
+   *  found without reading the file again. */
   let fileMatches = [];
   let fileMatchIndex = -1;
   let fileSearchQuery = '';
   let fileSearchDone = false;
-  let fileSearchTruncated = false;
+  /** The last read reached the end of the file without finding anything more,
+   *  so there is nothing left below to ask for. */
+  let fileSearchExhausted = false;
   let fileScannedRows = 0;
   let pendingMatchFocus = null;
   /** The row the last jump asked for, so an answer that does not cover it is
@@ -1307,8 +1278,8 @@ function getLargeFileWebviewHtml() {
       ? 'Find in column ' + label + ' — press Enter'
       : 'Find in file — press Enter';
     byId('filter').title = scoped
-      ? 'Searching downward in column ' + label + ' only, stopping at the first match; click its column header again to search every column'
-      : 'Press Enter to search downward from the current view; stops at the first match';
+      ? 'Searching column ' + label + ' only, downward from the current view; click its column header again to search every column'
+      : 'Press Enter to search downward from the current view, then Enter and Shift+Enter to walk the matches';
     byId('search-scope').textContent = scoped ? 'Column ' + label + ' only' : '';
   }
 
@@ -1368,14 +1339,20 @@ function getLargeFileWebviewHtml() {
         : 'Enter to search the file';
       return;
     }
-    const scanning = fileSearchDone ? '' : ' · searching… ' + fileScannedRows.toLocaleString() + ' rows';
+    // The file is read one match at a time, so there is no total to report:
+    // say which match the reader is on, and whether more may lie below.
     if (!fileMatches.length) {
-      countEl.textContent = fileSearchDone ? '0 results' : 'Searching… ' + fileScannedRows.toLocaleString() + ' rows';
+      countEl.textContent = fileSearchDone
+        ? (fileSearchExhausted ? 'No results' : '0 results')
+        : 'Searching… ' + fileScannedRows.toLocaleString() + ' rows';
       return;
     }
-    const total = fileMatches.length.toLocaleString() + (fileSearchTruncated ? '+' : '');
     const position = (fileMatchIndex < 0 ? 0 : fileMatchIndex) + 1;
-    countEl.textContent = position + '/' + total + ' results' + scanning;
+    const atNewest = fileMatchIndex >= fileMatches.length - 1;
+    const trailer = !fileSearchDone
+      ? ' · searching… ' + fileScannedRows.toLocaleString() + ' rows'
+      : fileSearchExhausted && atNewest ? ' · no more below' : ' · Enter for the next';
+    countEl.textContent = 'Result ' + position + trailer;
   }
 
   /** Highlight the query inside the loaded window. Never scrolls: paging must
@@ -1406,7 +1383,8 @@ function getLargeFileWebviewHtml() {
     updateMatchCount();
   }
 
-  /** Search downward from the first visible row, stopping at the first match. */
+  /** Start a search: read downward from the first visible row for the first
+   *  match. Later ones are asked for by nextMatch, from where this one ends. */
   function requestFileSearch(reveal) {
     fileSearchReveals = reveal !== false;
     const query = byId('filter').value.trim();
@@ -1414,7 +1392,7 @@ function getLargeFileWebviewHtml() {
     fileMatches = [];
     fileMatchIndex = -1;
     fileSearchDone = false;
-    fileSearchTruncated = false;
+    fileSearchExhausted = false;
     fileScannedRows = 0;
     pendingMatchFocus = null;
     fileSearchQuery = query;
@@ -1446,8 +1424,27 @@ function getLargeFileWebviewHtml() {
       query: query,
       column: hasSelectedSearchColumn() ? selectedSearchColumn : -1,
       fromRow: fromRow,
+      fromColumn: 0,
       fromPage: fromPage,
-      firstOnly: true,
+    });
+    updateMatchCount();
+  }
+
+  /** Read on from a match for the one after it. The host resumes in the cell
+   *  after this one, so the same match is never reported twice. */
+  function requestMatchAfter(match) {
+    fileSearchDone = false;
+    fileScannedRows = 0;
+    // The reader asked for this, so the scan may show them where it has got to.
+    fileSearchReveals = true;
+    following = true;
+    vscode.postMessage({
+      type: 'searchFile',
+      query: fileSearchQuery,
+      column: hasSelectedSearchColumn() ? selectedSearchColumn : -1,
+      fromRow: match.r,
+      fromColumn: match.c + 1,
+      fromPage: match.p,
     });
     updateMatchCount();
   }
@@ -1476,9 +1473,28 @@ function getLargeFileWebviewHtml() {
     vscode.postMessage({ type: 'gotoMatch', page: match.p, row: match.r, column: match.c });
   }
 
-  function stepMatch(delta) {
-    if (!fileMatches.length) return;
-    fileMatchIndex = (fileMatchIndex + delta + fileMatches.length) % fileMatches.length;
+  /**
+   * Enter: the next match down the file. The ones already found are walked
+   * without reading anything again; past the newest, the host reads on from it.
+   * There is no wrap, so the end of the file is where this stops.
+   */
+  function nextMatch() {
+    if (fileMatchIndex + 1 < fileMatches.length) {
+      fileMatchIndex++;
+      revealCurrentMatch(true);
+      return;
+    }
+    const newest = fileMatches[fileMatches.length - 1];
+    // Nothing found yet, or nothing left below: repeating the read would only
+    // walk to the end of the file again for the same answer.
+    if (!newest || fileSearchExhausted) { updateMatchCount(); return; }
+    requestMatchAfter(newest);
+  }
+
+  /** Shift+Enter: back through the matches this search has already found. */
+  function previousMatch() {
+    if (fileMatchIndex <= 0) { updateMatchCount(); return; }
+    fileMatchIndex--;
     revealCurrentMatch(true);
   }
 
@@ -1558,7 +1574,7 @@ function getLargeFileWebviewHtml() {
     fileMatchIndex = -1;
     fileSearchQuery = '';
     fileSearchDone = false;
-    fileSearchTruncated = false;
+    fileSearchExhausted = false;
     fileScannedRows = 0;
     pendingMatchFocus = null;
     following = false;
@@ -1711,15 +1727,15 @@ function getLargeFileWebviewHtml() {
       if (message.query === fileSearchQuery) updateMatchCount();
     } else if (message.type === 'searchMatches') {
       if (message.query !== fileSearchQuery) return;
-      const hadNone = fileMatches.length === 0;
       for (const match of message.matches) fileMatches.push(match);
       fileScannedRows = message.scannedRows;
-      fileSearchTruncated = message.truncated;
       fileSearchDone = message.done;
       if (message.done) stopFollowing();
-      if (hadNone && fileMatches.length) {
-        // The first result the scan reaches from where the reader is.
-        fileMatchIndex = 0;
+      // A finished read that found nothing has reached the end of the file.
+      if (message.done && !message.matches.length) fileSearchExhausted = true;
+      if (message.matches.length) {
+        // The match the read stopped at is the one to look at now.
+        fileMatchIndex = fileMatches.length - 1;
         revealCurrentMatch(fileSearchReveals);
       } else {
         updateMatchCount();
@@ -1737,12 +1753,14 @@ function getLargeFileWebviewHtml() {
       clearTimeout(filterTimer);
       const query = byId('filter').value.trim();
       if (!query) return;
-      // The first Enter reads the file; later ones walk the results it found.
+      // The first Enter reads the file; later ones walk on down it.
       if (query !== fileSearchQuery) {
         runSearch();
         requestFileSearch(true);
+      } else if (event.shiftKey) {
+        previousMatch();
       } else {
-        stepMatch(event.shiftKey ? -1 : 1);
+        nextMatch();
       }
     } else if (event.key === 'Escape') {
       clearTimeout(filterTimer);
@@ -1793,7 +1811,6 @@ function getLargeFileWebviewHtml() {
 module.exports = {
   PAGE_CACHE_MAX_BYTES,
   PAGE_CACHE_MAX_PAGES,
-  SEARCH_MATCH_LIMIT,
   searchLargeFile,
   LargeCsvDocument,
   CsvStreamPager,

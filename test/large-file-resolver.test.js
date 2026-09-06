@@ -176,25 +176,36 @@ test("ordinary paging is neither a jump nor a reveal", async (t) => {
   assert.equal(previous.startRow, 2);
 });
 
-test("a whole-file search reports matches and shows the pages it sweeps", async (t) => {
+test("a whole-file search reads on past the loaded window and shows the pages it sweeps", async (t) => {
   const lines = ["id,name"];
   for (let index = 1; index <= 3000; index++) {
-    lines.push(`${index},${index === 2500 ? "needle" : "plain"} ${index}`);
+    lines.push(`${index},${[2500, 2600].includes(index) ? "needle" : "plain"} ${index}`);
   }
   const { send, of, indexed } = await openPreview(t, lines);
   await send({ type: "ready" });
   await indexed();
 
-  await send({ type: "searchFile", query: "needle", column: -1, fromRow: 2 });
+  await send({ type: "searchFile", query: "needle", column: -1, fromRow: 2, fromColumn: 0 });
 
   const reports = of("searchMatches");
-  assert.ok(reports.length > 0, "the scan reports as it reads");
+  assert.ok(reports.length > 0, "the read reports as it goes");
   const final = reports.at(-1);
   assert.equal(final.done, true);
-  assert.equal(final.total, 1);
-  assert.equal(final.truncated, false);
   const found = reports.flatMap((report) => report.matches);
-  assert.deepEqual(found, [{ r: 2501, c: 1, p: 25 }], "the needle is row 2501, on page 25");
+  assert.deepEqual(found, [{ r: 2501, c: 1, p: 25 }],
+    "the read stops at the first needle, row 2501 on page 25");
+
+  // Reading on from that match reaches the next one and nothing before it.
+  await send({ type: "searchFile", query: "needle", column: -1, fromRow: 2501, fromColumn: 2, fromPage: 25 });
+  const next = of("searchMatches").slice(reports.length);
+  assert.deepEqual(next.flatMap((report) => report.matches), [{ r: 2601, c: 1, p: 26 }]);
+  assert.equal(next.at(-1).done, true);
+
+  // Past the last one the file ends, and the read says so instead of wrapping.
+  await send({ type: "searchFile", query: "needle", column: -1, fromRow: 2601, fromColumn: 2, fromPage: 26 });
+  const last = of("searchMatches").at(-1);
+  assert.deepEqual(last.matches, []);
+  assert.equal(last.done, true);
 
   const followed = of("page").filter((message) => message.follow);
   assert.ok(followed.length > 0, "the reader can see how far the scan has reached");
