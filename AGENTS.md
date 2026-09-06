@@ -395,11 +395,15 @@ node --test test/private-updater.test.js test/github-release-client.test.js
 node --test test/private-release.test.js
 ```
 
-Before handing off a behavior change, run:
+Before handing off a behavior change that is not being committed, run:
 
 ```powershell
 npm run verify
 ```
+
+When the change is being committed, the pre-commit hook runs exactly this
+against the staged contents, so do not run it yourself first; see the local
+checks in [.github/release-rules.md](.github/release-rules.md).
 
 That is `npm run build` (the distribution patch and the syntax checks), then the
 tests, then `scripts/verify-patch-idempotency.js`. It is the single definition of
