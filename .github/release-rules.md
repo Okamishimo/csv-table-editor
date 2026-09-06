@@ -24,6 +24,12 @@ authorize commits, pushes, merges, or publication. Follow the current task scope
 
 - Make changes on topic branches and merge into `main` through a PR.
 - Never push directly to `main`; administrators follow the same rule.
+- A PR is one of four kinds, told apart by its title alone:
+  `Docs: description`, `Feature: description`, `Fix: description`, and
+  `Release vX.Y.Z: description`. Every prefix is case-sensitive, and every
+  description must be nonempty and on one line.
+- Only a Release PR tags and publishes. Feature and Fix work merges into main
+  and waits there; a Release PR later publishes whatever has accumulated.
 - Release PR titles must start with `Release vX.Y.Z: ` followed by a description, for
   example `Release v0.0.16: protect the release workflow`.
 - Use stable semantic versions without zero padding, prerelease identifiers, or
@@ -31,10 +37,27 @@ authorize commits, pushes, merges, or publication. Follow the current task scope
 - The title version must exactly match `package.json`'s `version`, the root
   `version` in `package-lock.json`, and its `packages[""].version`.
 - The version must exceed the PR's main base version and have no existing tag.
+- A Release PR must carry the bump itself: `PR policy` refuses one whose
+  `package.json` and `package-lock.json` versions match its base. That is what
+  separates a release from the Feature and Fix PRs it publishes.
 - Before merging, `PR policy` and `Verify` must pass, the branch must be up to
   date with main, and all conversations must be resolved. This single-maintainer
   repository does not require an additional reviewer's approval.
 - Follow these collaboration rules even when the GitHub plan cannot enforce them.
+
+## Feature and Fix PRs
+
+- Use `Feature: description` for new behavior and `Fix: description` for
+  corrections, for example `Fix: stop the preview flickering`. Both carry code,
+  configuration, workflows, tests, and any documentation that belongs with them.
+- Both run the full `Verify` job, exactly as a Release PR does. Only Docs PRs
+  take the quick-check path.
+- Neither changes a version. `PR policy` refuses a Feature or Fix PR that moves
+  `package.json` or `package-lock.json`: a bump merged without a release would
+  leave main claiming a version no tag and no VSIX ever carried.
+- Merging one creates no tag, VSIX, or GitHub Release. It merges and stops.
+- Choose between them by what the change does, not by its size. When a PR does
+  both, `Feature:` is the honest prefix.
 
 ## Documentation PRs
 
@@ -49,18 +72,19 @@ authorize commits, pushes, merges, or publication. Follow the current task scope
   `changelog.md`, `AGENTS.md`, `CLAUDE.md`, `.github/release-rules.md`, under `docs/`,
   or `SKILL.md` and `references/**/*.md` inside named skills under `.agents/skills/`
   and `.claude/skills/`. Skill names use lowercase letters, digits, and hyphens.
-- All other paths require a Release PR, including source code, tests, scripts,
-  workflows, manifests, lockfiles, hooks, configuration, and media. A `.md`
-  extension alone does not qualify a file in a code directory as documentation.
+- All other paths require a Feature, Fix, or Release PR, including source code,
+  tests, scripts, workflows, manifests, lockfiles, hooks, configuration, and
+  media. A `.md` extension alone does not qualify a file in a code directory as
+  documentation.
 - Additions, modifications, deletions, and both sides of renames are checked.
   Moving code into a Markdown path does not conceal the deleted code path.
   Symlinks and executable files are rejected even at allowed documentation paths.
 - If a Docs PR includes any non-documentation change, `PR policy` fails. Do not
-  widen the allowlist just to pass the check: use a Release PR or separate the
-  changes into correctly scoped PRs.
-- Both PR types retain `PR policy` and `Verify` checks. For Docs PRs, `Verify`
-  confirms the successful quick checks; for Release PRs, it runs full verification.
-  Title edits and new commits rerun classification and validation.
+  widen the allowlist just to pass the check: use a Feature, Fix, or Release PR,
+  or separate the changes into correctly scoped PRs.
+- Every kind retains `PR policy` and `Verify` checks. For Docs PRs, `Verify`
+  confirms the successful quick checks; for every other kind it runs full
+  verification. Title edits and new commits rerun classification and validation.
 - The local pre-commit hook still runs full staged-content verification for all
   commits. The quick-check exception applies to documentation PR CI only.
 
@@ -102,19 +126,20 @@ not require GitHub Pro.**
 The normal flow is:
 
 ```text
-Topic branch -> staged verification -> commit -> push -> Release vX.Y.Z: description PR
+Topic branch -> staged verification -> commit -> push
+-> Docs / Feature / Fix PR -> PR policy / Verify pass -> merge into main -> stop
+-> Release vX.Y.Z: description PR (the version bump itself)
 -> PR policy / Verify pass -> merge into main
 -> create vX.Y.Z on the PR's exact merge commit
 -> call the private release workflow -> package, verify, publish
 ```
 
-- [delete-merged-branch.yml](workflows/delete-merged-branch.yml) deletes a merged
-  PR's head branch, for Docs and Release PRs alike. A PR closed without merging
-  keeps its branch, and the deletion cannot affect a tag: that points at the
-  merge commit on main. Do not delete branches by hand in anticipation of it.
 - [merge-release.yml](workflows/merge-release.yml) handles merged PRs into main.
-  Closing an unmerged PR does not create a tag. A merged Docs PR reports that
-  publication is skipped and never calls the tag API or release workflow.
+  Closing an unmerged PR does not create a tag. A merged Docs, Feature, or Fix PR
+  reports that publication is skipped and never calls the tag API or release
+  workflow, nor does it read a version.
+- The repository setting deletes a merged PR's head branch. No workflow does it,
+  and a PR closed without merging keeps its branch.
 - The tag targets the PR's `merge_commit_sha`, not a later main HEAD at workflow
   execution time. Validate title, manifest, lockfile, and main ancestry again.
 - On retry, reuse an existing tag only when it points to that same commit.

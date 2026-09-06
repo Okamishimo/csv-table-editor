@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate PR type and documentation scope or release version
+      - name: Validate the PR type and its documentation scope or version change
         id: policy
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -42,20 +42,20 @@ jobs:
     steps:
       - name: Documentation quick checks passed
         if: needs.policy.outputs.kind == 'docs'
-        run: echo "Documentation scope and whitespace verified; full release tests are not required for this PR."
+        run: echo "Documentation scope and whitespace verified; full tests are not required for this PR."
       - uses: actions/checkout@v4
-        if: needs.policy.outputs.kind == 'release'
+        if: needs.policy.outputs.kind != 'docs'
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
-        if: needs.policy.outputs.kind == 'release'
+        if: needs.policy.outputs.kind != 'docs'
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
-        if: needs.policy.outputs.kind == 'release'
+        if: needs.policy.outputs.kind != 'docs'
       - run: npm run verify
-        if: needs.policy.outputs.kind == 'release'
+        if: needs.policy.outputs.kind != 'docs'
       - name: Require generated distribution changes to be committed
-        if: needs.policy.outputs.kind == 'release'
+        if: needs.policy.outputs.kind != 'docs'
         run: git diff --exit-code

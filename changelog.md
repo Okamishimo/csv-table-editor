@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Pull requests come in four kinds: `Docs:`, `Feature:`, `Fix:` and
+  `Release vX.Y.Z:`. Feature and Fix work merges into main without a tag or a
+  release, and a later release publishes what has accumulated. Only a release
+  PR may change the version, and it must.
+- A merged pull request's branch is deleted by the repository setting rather
+  than by a workflow of ours.
+
 ## [0.0.18] - 2026-09-06
 
 ### Fixed
