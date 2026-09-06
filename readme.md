@@ -243,6 +243,8 @@ Authentication and installation references:
   unusual files.
 - The table diff compares serialized CSV text, so purely formatting-level
   differences (quoting style) may show as changes.
+- The diff matches columns by header name, so two columns that swapped places
+  are reported as one removed and one added rather than as a move.
 - History is keyed by file path — renaming or moving a file starts a fresh
   history.
 - The editable grid keeps only the rows near the viewport in the DOM, so very

@@ -120,6 +120,14 @@ const replacements = [
     to: 'registerEdit(e,t,n,i){const r=this._panels.get(e);this._onDidChangeCustomDocument.fire({document:e,label:t,undo:()=>{r&&this.post(r,{type:"applyEdit",op:n})},redo:()=>{r&&this.post(r,{type:"applyEdit",op:i})}})}',
   },
   {
+    name: "cell-level history diff",
+    // The anchor reaches into the original body, so the patched form cannot
+    // match it again and be wrapped a second time.
+    from: 't.showTableDiff=function(e,t,n){const i=c(e)',
+    to: 't.showTableDiff=function(e,t,n){return require("../src/history-diff").showTableDiff(e,t,n,s)},t.__replacedShowTableDiff=function(e,t,n){const i=c(e)',
+    already: 't.showTableDiff=function(e,t,n){return require("../src/history-diff").showTableDiff(e,t,n,s)}',
+  },
+  {
     name: "large file save bypass",
     from: 'async saveCustomDocument(e,t){await e.save(t),await this.captureHistory(e,e.uri)}',
     to: 'async saveCustomDocument(e,t){if(e.isLargeFile)return e.save(t);return require("../src/save-progress").withSaveProgress(s,e.uri,async()=>{await e.save(t),await this.captureHistory(e,e.uri)})}',

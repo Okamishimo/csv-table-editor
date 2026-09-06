@@ -38,6 +38,8 @@ into the original runtime by `scripts/patch-distribution.js`.
   document/provider behavior, and the read-only preview Webview.
 - `src/large-file-index.js`: One pass over a large file for its exact row count
   and the byte offset of every page.
+- `src/history-diff.js`: The side-by-side history diff, aligned by column and
+  then by row, and highlighted per cell.
 - `src/font-settings.js`: Free-form `csvTableEditor.fontFamily` support and live
   setting updates.
 - `src/search-scope.js`: Decorates the editable Webview with column-scoped
@@ -239,6 +241,23 @@ Large-file protections are correctness requirements, not optional tuning.
 - When adding fields to preview rows, consider the worst case of 500 rows by
   100 columns before adding per-cell listeners, attributes, titles, or stored
   objects. Prefer event delegation and lazy work.
+
+## History Diff
+
+The diff highlights what actually changed, at the smallest honest granularity:
+
+- A row that changed highlights only the cells whose values differ. A row that
+  was added or removed is highlighted whole, because every cell of it is.
+- Columns are aligned before rows, by header name. Without that, a column
+  inserted in the middle shifts every value one place and makes every cell of
+  every row look changed, which is worse than the whole-row highlight it
+  replaced. A column present on one side only is highlighted whole, and the
+  other side shows a gap in its place so the two panes stay aligned.
+- Rows are aligned on their values in the columns the two sides share, so adding
+  a column does not make every row look different either.
+- Aligning costs one matrix cell per pair of rows, so identical leading and
+  trailing rows are trimmed first and the remainder is compared by position when
+  it is still too large. Do not remove that bound: the two sides are whole files.
 
 ## Saving and Undo
 

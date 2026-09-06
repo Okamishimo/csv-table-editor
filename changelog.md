@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The history diff highlights the cells that changed rather than the whole row.
+  Rows that were added or removed are still highlighted whole, and a column that
+  exists in only one of the two versions is highlighted whole as well. Columns
+  are matched by name first, so inserting a column no longer makes every cell of
+  every row look changed.
+
 - Searching the large-file preview now starts when you press Enter rather than
   while you are still typing. Typing highlights the rows already on screen and
   says how many it found there; Enter reads the file, and Enter again walks the
