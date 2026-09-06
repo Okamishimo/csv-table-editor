@@ -149,7 +149,12 @@ Keep the repository private rather than making it public to enable protections.
 
 ## Completion reporting
 
-State what remains local, what is committed/pushed, and what GitHub has actually
-verified. After publication, confirm the workflow conclusion, published Release
-state, asset names and sizes, and SHA-256. A created tag or successful asset upload
-alone does not prove publication is complete.
+An agent's work on a release ends when the PR exists. State what remains local,
+what is committed and pushed, and confirm the PR was created, giving its number,
+title, and base. Reporting the result of its `PR policy` and `Verify` checks is
+useful; nothing past that belongs in the report.
+
+Merging the PR, the tag its merge creates, the release workflow's run, and the
+published Release are the maintainer's to carry out and confirm. Do not merge a
+release PR, do not watch the publication workflow, and do not download published
+assets to recompute a checksum the workflow has already generated and verified.
