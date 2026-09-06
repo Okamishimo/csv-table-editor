@@ -229,6 +229,14 @@ Large-file protections are correctness requirements, not optional tuning.
   worth making. Without that, a mismatch the answer cannot fix becomes a request
   that answers itself for ever, which the reader sees as a flickering status and
   a scrollbar that will not settle.
+- A jump answers with the page holding the row and the page below it, because
+  the reader can stop on the last row of a page and would otherwise be left
+  with a few rows above a blank screen. When a window still ends above the
+  bottom of the viewport, the preview reads on from the bottom of the window
+  rather than waiting for another scroll. That converges as the rule above
+  requires: each page ends lower than the last, and the end of the file stops
+  it. Nothing is fetched above, because the row the reader stopped at is the
+  top of the viewport.
 - A running scan may show the pages it passes, so the reader can see how far it
   has reached. Following ends the moment the reader scrolls, a result is
   revealed, or the scan finishes; it must never fight them for the viewport.

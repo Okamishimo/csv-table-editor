@@ -1200,6 +1200,47 @@ test("dragging the scrollbar far away loads that part of the file and stays ther
   assert.match(document.getElementById("status").textContent, /of 10,000/);
 });
 
+test("a jump that lands near the bottom of its window fills the rest of the screen", async (t) => {
+  const { send, document, page, index, scrollTo, offsetOfRow, postedMessages, wrap } =
+    openMeasuredPreview(t);
+  page(1, "replace");
+  index(10000);
+
+  // A fast drag stops at row 5000, which the answering page ends two rows
+  // below: the viewport holds twenty, so eighteen of them would be blank.
+  await scrollTo(offsetOfRow(5000));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))), { type: "gotoRow", row: 5000 });
+  page(50, "replace", { keepScroll: true });
+  send({ type: "loading", loading: false });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
+    { type: "nextPage", afterPage: 50 }, "so the window reads on rather than waiting for a scroll");
+  assert.equal(wrap.scrollTop, offsetOfRow(5000), "without moving the reader off the row they stopped at");
+
+  // With the screen covered it stops, rather than paging on for ever.
+  page(51, "append");
+  send({ type: "loading", loading: false });
+  assert.equal(postedMessages.at(-1).type, "nextPage",
+    "the viewport is full, so nothing further is asked for");
+  assert.equal(postedMessages.filter((message) => message.type === "nextPage").length, 1);
+  assert.equal(document.getElementById("rows").rows.length, 200);
+});
+
+test("the end of the file stops the window filling itself", async (t) => {
+  const { send, page, index, scrollTo, offsetOfRow, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(1000);
+
+  await scrollTo(offsetOfRow(1000));
+  assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))), { type: "gotoRow", row: 1000 });
+  // The last page of the file: there is nothing below to ask for.
+  page(10, "replace", { keepScroll: true, done: true });
+  send({ type: "loading", loading: false });
+
+  assert.equal(postedMessages.at(-1).type, "gotoRow",
+    "a short last page is the end of the file, not a window to extend");
+});
+
 test("scrolling inside the loaded window fetches neighbours rather than jumping", async (t) => {
   const { send, page, index, scrollTo, offsetOfRow, postedMessages } = openMeasuredPreview(t);
   page(1, "replace");
