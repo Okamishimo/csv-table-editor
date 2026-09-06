@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Rapid saves no longer overwrite each other's history index entries. Each
+  version keeps the exact saved bytes, including edits in the focused cell.
+- Adjacent changed rows in history comparisons align one for one, preserving
+  cell-level highlights for multiple edits.
+- Read-only preview searches begin at the first visible row and continue
+  downward, stopping at the first match without restarting from the top.
+
+### Added
+
+- History comparisons jump to the first change and offer previous/next change
+  buttons, a position counter, and Shift+F7/F7 keyboard navigation.
+
 ## [0.0.17] - 2026-09-06
 
 ### Changed

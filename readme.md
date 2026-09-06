@@ -56,10 +56,13 @@ reopen or save with any of these via the clickable encoding label:
 ### History and diff
 
 - Every save is captured as a version (the last 50 are kept), stored in the
-  extension's global storage — not as stray files next to your CSV.
+  extension's global storage — not as stray files next to your CSV. Rapid saves
+  are recorded in order, including the cell still being edited.
 - Open the **History** panel from the toolbar to browse past versions.
 - Compare any version with the current content in a side-by-side **table diff**
-  that highlights added, removed and changed rows.
+  that highlights changed cells, added or removed rows, and added or removed
+  columns. It jumps to the first change automatically; use **↑ / ↓** or
+  **Shift+F7 / F7** to move between changed rows.
 - Roll back to a version as unsaved changes, so you review before overwriting.
 
 ![Side-by-side table diff between a history version and the current content](https://raw.githubusercontent.com/minlong8111/assets/main/csv-table-editor/screenshot-diff.png)
@@ -104,12 +107,10 @@ Rows are loaded for where you stop, not for everywhere you passed: a wheel or
 trackpad gesture, and a scrollbar drag, load one window once the scroller has
 come to rest.
 
-Search covers the **whole file**, not just the rows on screen. Typing
-highlights the rows already loaded; press **Enter** to read the file. Matches
-start appearing while the rest is still being read, beginning at the row you are
-looking at and wrapping around the end. Enter and Shift+Enter then step between
-them and load whichever page holds the next one; clicking a column header limits
-the search to that column.
+Typing highlights the rows already loaded. Press **Enter** to search downward
+from the first visible row, continuing beyond the loaded window and stopping at
+the first matching cell. The preview jumps to that result and does not wrap to
+the top of the file. Clicking a column header limits the search to that column.
 Loading adjacent pages keeps the visible record at the same screen position,
 including when older rows leave the window or a search is active.
 

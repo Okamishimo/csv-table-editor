@@ -850,7 +850,7 @@ test("typing highlights what is on screen; Enter is what reads the file", async 
 
   filter.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   assert.deepEqual(JSON.parse(JSON.stringify(postedMessages.at(-1))),
-    { type: "searchFile", query: "Alice", column: -1, fromRow: 302 },
+    { type: "searchFile", query: "Alice", column: -1, fromRow: 302, fromPage: 4, firstOnly: true },
     "the scan starts at the first loaded row so results continue from here");
 
   // Scoping to a column restarts the scan for that column only.
@@ -1402,4 +1402,30 @@ test("the counter says what is on screen until the file has actually been read",
   assert.equal(count.textContent, "Searching… 0 rows", "now it is genuinely reading the file");
   answerSearch(postedMessages, send, [{ r: 2, c: 0, p: 1 }, { r: 3, c: 0, p: 1 }]);
   assert.equal(count.textContent, "1/2 results");
+});
+
+test("preview search starts at the visible row rather than the first cached row", (t) => {
+  const { window, document, send, postedMessages } = openPreview(t);
+  send({ type: "page", mode: "replace", header: ["Name"],
+    rows: Array.from({ length: 100 }, (_, i) => [`value ${i}`]), pageNumber: 4,
+    startRow: 302, endRow: 401, done: false, truncatedCells: 0, truncatedColumns: false });
+  const wrap = document.getElementById("table-wrap");
+  wrap.getBoundingClientRect = () => ({ top: 0, bottom: 260, height: 260 });
+  document.querySelector("thead").getBoundingClientRect = () => ({ top: 0, bottom: 26, height: 26 });
+  for (const row of document.getElementById("rows").rows) {
+    row.getBoundingClientRect = () => {
+      const top = 26 + (Number(row.dataset.rowNumber) - 342) * 24;
+      return { top, bottom: top + 24, height: 24 };
+    };
+  }
+  const input = document.getElementById("filter");
+  input.value = "value";
+  input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const request = postedMessages.at(-1);
+  assert.equal(request.fromRow, 342);
+  assert.equal(request.fromPage, 4);
+  assert.equal(request.firstOnly, true);
+  const requests = postedMessages.length;
+  document.querySelector('#rows tr th').click();
+  assert.equal(postedMessages.length, requests, "row-number clicks do not restart or scope search");
 });

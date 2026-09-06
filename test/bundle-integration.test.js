@@ -336,3 +336,41 @@ test("patched provider resolves oversized local files with the streaming webview
     await fs.promises.rm(temporaryDirectory, { recursive: true, force: true });
   }
 });
+
+test("actual provider captures every rapid save and save-as in the patched history store", async () => {
+  const files = new Map();
+  const uri = (value) => ({ scheme: "file", path: value, toString: () => value });
+  const vscode = {
+    EventEmitter: class { constructor() { this.event = () => {}; } },
+    Uri: { joinPath: (base, ...parts) => uri([base.toString(), ...parts].join("/")) },
+    workspace: { fs: {
+      async createDirectory() {},
+      async readFile(target) {
+        await new Promise(setImmediate);
+        if (!files.has(target.toString())) throw new Error("not found");
+        return files.get(target.toString());
+      },
+      async writeFile(target, data) { await new Promise(setImmediate); files.set(target.toString(), Buffer.from(data)); },
+      async delete(target) { files.delete(target.toString()); },
+    } },
+  };
+  const Provider = loadBundleInternals(vscode)(248).CsvEditorProvider;
+  const provider = new Provider({ globalStorageUri: uri("/storage") });
+  const document = { uri: uri("/rapid.csv"), encodingKey: "utf8", serialize: async () => Buffer.from("initial") };
+  const writes = [];
+  for (let i = 0; i < 8; i++) {
+    // The real save wrapper requests the grid asynchronously.
+    document.serialize = async () => Buffer.from(String(i));
+    writes.push(provider.saveCustomDocument(document, {}));
+    await new Promise(setImmediate);
+  }
+  await Promise.all(writes);
+  const entries = await provider._history.list(document.uri);
+  assert.equal(entries.length, 8);
+  const contents = await Promise.all(entries.map((entry) => provider._history.get(document.uri, entry.id)));
+  assert.deepEqual(contents.map(String), ["7", "6", "5", "4", "3", "2", "1", "0"]);
+  const copy = uri("/copy.csv");
+  await provider.saveCustomDocumentAs(document, copy, {});
+  assert.equal((await provider._history.list(copy)).length, 1);
+  assert.equal(files.get(copy.toString()).toString(), "7");
+});

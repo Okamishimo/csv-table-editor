@@ -540,6 +540,39 @@ async function searchLargeFile(document, request, hooks) {
   const column = Number.isInteger(request.column) && request.column >= 0 ? request.column : -1;
   const fromRow = Number.isFinite(request.fromRow) ? Number(request.fromRow) : 0;
 
+  // The preview asks for only the next match, starting at the visible page.
+  // pageAt uses the file index to seek directly; do not scan earlier pages just
+  // to reorder their results later. No wrap: this request searches downward.
+  if (request.firstOnly) {
+    const fromPage = Number.isInteger(request.fromPage) && request.fromPage > 0
+      ? request.fromPage : Math.max(1, Math.floor((fromRow - 2) / PAGE_ROWS) + 1);
+    let scannedRows = 0;
+    for (let pageNumber = fromPage;; pageNumber++) {
+      if (hooks.cancelled()) return;
+      const page = await hooks.serialize(() => document.pageAt(pageNumber));
+      if (hooks.cancelled()) return;
+      if (!page) break;
+      if (hooks.onPage) hooks.onPage(page);
+      for (const [index, row] of page.rows.entries()) {
+        const r = page.startRow + index;
+        if (r < fromRow) continue;
+        scannedRows++;
+        const first = column >= 0 ? column : 0;
+        const last = column >= 0 ? Math.min(column + 1, row.length) : row.length;
+        for (let c = first; c < last; c++) {
+          if (row[c] == null || !String(row[c]).toLocaleLowerCase().includes(needle)) continue;
+          hooks.report({ matches: [{ r, c, p: page.pageNumber }], done: true,
+            total: 1, truncated: false, scannedRows });
+          return;
+        }
+      }
+      if (page.done) break;
+      hooks.report({ matches: [], done: false, total: 0, truncated: false, scannedRows });
+    }
+    if (!hooks.cancelled()) hooks.report({ matches: [], done: true, total: 0, truncated: false, scannedRows });
+    return;
+  }
+
   const wrapped = [];
   let ahead = [];
   let total = 0;
@@ -1274,8 +1307,8 @@ function getLargeFileWebviewHtml() {
       ? 'Find in column ' + label + ' — press Enter'
       : 'Find in file — press Enter';
     byId('filter').title = scoped
-      ? 'Searching column ' + label + ' only, through the whole file; click its column header again to search every column'
-      : 'Press Enter to search the whole file, then Enter and Shift+Enter to move between matches';
+      ? 'Searching downward in column ' + label + ' only, stopping at the first match; click its column header again to search every column'
+      : 'Press Enter to search downward from the current view; stops at the first match';
     byId('search-scope').textContent = scoped ? 'Column ' + label + ' only' : '';
   }
 
@@ -1373,9 +1406,7 @@ function getLargeFileWebviewHtml() {
     updateMatchCount();
   }
 
-  /** Ask the host to read the whole file for the current query. The scan starts
-   *  at the first loaded row and wraps, so results arrive in the order the
-   *  reader would walk them. */
+  /** Search downward from the first visible row, stopping at the first match. */
   function requestFileSearch(reveal) {
     fileSearchReveals = reveal !== false;
     const query = byId('filter').value.trim();
@@ -1395,6 +1426,18 @@ function getLargeFileWebviewHtml() {
       return;
     }
     const rows = byId('rows').rows;
+    const measurable = rows.length && rows[0].getBoundingClientRect().height > 0;
+    const anchor = measurable
+      ? captureScrollAnchor(byId('rows'), byId('table-wrap'), document.querySelector('thead')) : null;
+    const startRow = anchor ? anchor.row : rows[0];
+    // A scrollbar jump may still be awaiting its window. Use that position
+    // instead of the stale rendered rows when none of them covers the view.
+    const fromRow = absoluteScrolling() && (!anchor ||
+      anchor.row.getBoundingClientRect().bottom <= byId('table-wrap').getBoundingClientRect().top ||
+      anchor.row.getBoundingClientRect().top >= byId('table-wrap').getBoundingClientRect().bottom)
+      ? rowAtViewportTop() : startRow ? Number(startRow.dataset.rowNumber) : 2;
+    const fromPage = absoluteScrolling() ? Math.max(1, Math.floor((fromRow - 2) / ${PAGE_ROWS}) + 1)
+      : startRow ? Number(startRow.dataset.pageNumber) : 1;
     // Follow the scan while it sweeps, so the reader can see how far it has
     // reached; the first result, or any scrolling, hands control back.
     following = fileSearchReveals;
@@ -1402,7 +1445,9 @@ function getLargeFileWebviewHtml() {
       type: 'searchFile',
       query: query,
       column: hasSelectedSearchColumn() ? selectedSearchColumn : -1,
-      fromRow: rows.length ? Number(rows[0].dataset.rowNumber) || 0 : 0,
+      fromRow: fromRow,
+      fromPage: fromPage,
+      firstOnly: true,
     });
     updateMatchCount();
   }

@@ -325,3 +325,37 @@ test("scrolling back past the cache reads the page again instead of giving up", 
   assert.equal(previous.startRow, 102);
   assert.deepEqual(previous.rows[0], ["101", "name 101"]);
 });
+
+test("preview search reads from the current page and stops at the first match", async () => {
+  const document = fakeDocument(8, { value: (row) => [3, 9, 10, 12, 20].includes(row) ? "target" : "plain" });
+  const { matches, reports } = await scan(document,
+    { query: "target", fromRow: 10, fromPage: 3, firstOnly: true });
+  assert.deepEqual(document.reads, [3], "no page before the reader or after the first match is read");
+  assert.deepEqual(positions(matches), ["10:1"], "matches above the viewport on the same page are skipped");
+  assert.equal(reports.at(-1).done, true);
+  assert.equal(reports.at(-1).scannedRows, 1);
+});
+
+test("preview search continues downward across pages, honours scope, and does not wrap", async () => {
+  const document = fakeDocument(5, { value: (row) => [3, 15].includes(row) ? "target" : "plain" });
+  const request = { query: "target", fromRow: 10, fromPage: 3, firstOnly: true, column: 1 };
+  const { matches } = await scan(document, request);
+  assert.deepEqual(document.reads, [3, 4, 5]);
+  assert.deepEqual(positions(matches), ["15:1"]);
+  document.reads.length = 0;
+  const scoped = await scan(document, { ...request, column: 0 });
+  assert.equal(scoped.matches.length, 0);
+  assert.deepEqual(document.reads, [3, 4, 5]);
+  const noWrap = await scan(document, { ...request, fromRow: 16, fromPage: 5 });
+  assert.equal(noWrap.matches.length, 0);
+});
+
+test("a cancelled first-match search emits nothing after an in-flight read", async () => {
+  const document = fakeDocument(3, { value: () => "target" });
+  let cancelled = false;
+  const read = document.pageAt;
+  document.pageAt = async (page) => { const value = await read(page); cancelled = true; return value; };
+  const { reports } = await scan(document, { query: "target", fromPage: 2, firstOnly: true }, { cancelled: () => cancelled });
+  assert.deepEqual(reports, []);
+  assert.deepEqual(document.reads, [2]);
+});
