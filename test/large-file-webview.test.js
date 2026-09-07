@@ -1149,6 +1149,54 @@ function openMeasuredPreview(t) {
   return { ...harness, wrap, page, index, spacer, scrollTo, offsetOfRow, setRenderedRowHeight };
 }
 
+test("preview multiline toggles keep text, selection scope and search traffic intact", async (t) => {
+  const { window, document, send, click, postedMessages } = openPreview(t);
+  send({ type: 'page', mode: 'replace', header: ['id', 'note'],
+    rows: [['1', 'first\nsecond\nthird'], ['2', 'plain']], startRow: 2, pageNumber: 1, done: true });
+  const content = document.querySelector('.csv-multiline');
+  const toggle = () => content.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  const collapsedHeight = window.getComputedStyle(content).height;
+  assert.ok(Math.abs(parseFloat(collapsedHeight) / parseFloat(window.getComputedStyle(content).fontSize) - 2.1) < 0.001);
+  const count = postedMessages.length;
+  toggle();
+  assert.equal(window.getComputedStyle(content).height, 'auto');
+  toggle();
+  assert.equal(window.getComputedStyle(content).height, collapsedHeight);
+  assert.equal(content.textContent, 'first\nsecond\nthird');
+  await settle(window);
+  assert.equal(postedMessages.length, count, 'toggling cannot start paging or searching');
+  click(document.querySelector('th.column-header[data-column-index="1"]'));
+  const selected = document.querySelector('th.search-column');
+  click(document.querySelector('#rows th.row-number'));
+  assert.equal(document.querySelector('th.search-column'), selected, 'row clicks preserve column scope');
+});
+
+test("expanded preview rows affect absolute navigation and are discarded with their window", async (t) => {
+  const { window, document, wrap, page, index, postedMessages, scrollTo } = openMeasuredPreview(t);
+  const originalRect = window.HTMLTableRowElement.prototype.getBoundingClientRect;
+  window.HTMLTableRowElement.prototype.getBoundingClientRect = function rect() {
+    const result = originalRect.call(this);
+    if (this.parentElement?.id !== 'rows') return result;
+    const measuring = this.parentElement.classList.contains('csv-measuring');
+    const extra = (row) => !measuring && row.querySelector('.csv-expanded') ? 260 : 0;
+    let above = 0;
+    for (const row of this.parentElement.rows) {
+      if (row === this) break;
+      above += extra(row);
+    }
+    return { top: result.top + above, height: result.height + extra(this), bottom: result.bottom + above + extra(this) };
+  };
+  page(1, 'replace', { rows: Array.from({ length: 100 }, (_, i) => ['row' + i, i === 0 ? 'one\ntwo\nthree' : 'plain']) });
+  index(10000);
+  document.querySelector('.csv-multiline').dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  await scrollTo(HEAD_HEIGHT + 500 * ROW_HEIGHT + 260);
+  const requests = postedMessages.filter((message) => message.type === 'gotoRow');
+  assert.equal(requests.at(-1).row, 502, 'the expanded height is excluded when locating a row');
+  page(6, 'replace', { keepScroll: true });
+  assert.equal(wrap.scrollTop, HEAD_HEIGHT + 500 * ROW_HEIGHT);
+  assert.equal(document.querySelectorAll('.csv-expanded').length, 0);
+});
+
 test("once the file is counted, placeholders carry the rows that are not loaded", (t) => {
   const { document, page, index, spacer } = openMeasuredPreview(t);
   page(1, "replace");

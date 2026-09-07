@@ -108,6 +108,24 @@ function editCell(harness, r, c, value) {
 
 const SAMPLE = "id,name,city\n1,Alice,Taipei\n2,Bob,Osaka\n3,Chen,Seoul";
 
+test("expanded multiline editing preserves line breaks through save, undo and redo", (t) => {
+  const original = 'first\r\nsecond\r\n';
+  const harness = openGrid('id,note\n1,"' + original + '"');
+  t.after(() => harness.window.close());
+  const cell = harness.document.querySelector('td[data-r="1"][data-c="1"] .cell');
+  cell.focus();
+  cell.dispatchEvent(new harness.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(harness.grid()[1][1], original);
+  assert.equal(harness.edits().length, 0);
+  const edited = 'edited\nsecond\nthird\n';
+  editCell(harness, 1, 1, edited);
+  assert.equal(harness.grid()[1][1], edited);
+  harness.undo();
+  assert.equal(harness.grid()[1][1], original);
+  harness.redo();
+  assert.equal(harness.grid()[1][1], edited);
+});
+
 test("decorator is idempotent and refuses a bundle it does not recognise", () => {
   const once = decoratedGridHtml();
   assert.equal(editHistory.decorateWebviewHtml(once), once);

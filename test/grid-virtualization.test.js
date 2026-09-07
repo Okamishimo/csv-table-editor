@@ -141,6 +141,58 @@ test("decorator is idempotent and refuses a bundle it does not recognise", () =>
   );
 });
 
+test("multiline cells toggle independently and preserve all text when focused and saved", (t) => {
+  const value = 'first\nsecond\nthird\n';
+  const harness = openGrid('id,note,other\n1,"' + value + '","a\nb"');
+  const { dom, window, document, postedMessages, send } = harness;
+  t.after(() => dom.window.close());
+  const cell = document.querySelector('td[data-r="1"][data-c="1"] .cell');
+  const other = document.querySelector('td[data-r="1"][data-c="2"] .cell');
+  const toggle = (target) => target.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(cell.textContent, value);
+  cell.style.fontSize = '16px';
+  const style = window.getComputedStyle(cell);
+  assert.ok(Math.abs(parseFloat(style.height) / parseFloat(style.fontSize) - 2.1) < 0.001);
+  cell.focus();
+  assert.equal(cell.classList.contains('csv-expanded'), false, 'single focus does not expand');
+  toggle(cell);
+  assert.equal(window.getComputedStyle(cell).height, 'auto');
+  toggle(other);
+  toggle(cell);
+  assert.equal(cell.classList.contains('csv-expanded'), false);
+  assert.equal(other.classList.contains('csv-expanded'), true);
+  send({ type: 'requestGridData', requestId: 123 });
+  assert.equal(postedMessages.filter((message) => message.type === 'edit').length, 0,
+    'view toggles and saving an unchanged focused cell must not create edits');
+  assert.equal(cell.textContent, value, 'including the final newline');
+  const rowHeader = document.querySelector('th[data-rowhead="1"]');
+  rowHeader.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  assert.match(document.getElementById('filter').title, /whole table/, 'row numbers do not scope search');
+  assert.equal(postedMessages.find((message) => message.requestId === 123).grid[1][1], value);
+});
+
+test("expanded row heights survive virtual eviction and do not mislocate distant rows", (t) => {
+  const { dom, window, document, scrollTo } = openGrid(csvText(5000).replace('name1,plain', 'name1,"one\ntwo\nthree"'));
+  t.after(() => dom.window.close());
+  window.HTMLTableRowElement.prototype.getBoundingClientRect = function rect() {
+    const height = this.className === 'csv-spacer' ? 0
+      : this.querySelector('.csv-expanded') && !this.closest('.csv-measuring') ? 182 : ROW_HEIGHT;
+    return { top: 0, bottom: height, height };
+  };
+  const cell = document.querySelector('td[data-r="1"][data-c="2"] .cell');
+  cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  scrollTo(200 * ROW_HEIGHT + 156);
+  assert.equal(dataRows(document)[0].cells[0].dataset.rowhead, '190');
+  assert.equal(spacerHeights(document).top, 190 * ROW_HEIGHT + 156);
+  assert.ok(dataRows(document).length < 60);
+  scrollTo(0);
+  const restored = document.querySelector('td[data-r="1"][data-c="2"] .cell');
+  assert.ok(restored.classList.contains('csv-expanded'));
+  restored.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  scrollTo(200 * ROW_HEIGHT);
+  assert.equal(spacerHeights(document).top, 190 * ROW_HEIGHT);
+});
+
 test("only the rows around the viewport reach the DOM, spacers stand in for the rest", () => {
   const total = 5000;
   const { document } = openGrid(csvText(total));
