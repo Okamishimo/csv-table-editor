@@ -23,6 +23,7 @@ This page covers what the extension does and how to use it. The longer subjects 
 
 - Opens CSV/TSV files in a spreadsheet-like grid — no external tools.
 - Inline cell editing; add or remove rows and columns.
+- Multi-line cells show one and a half lines by default. Double-click a cell to expand it; double-click again to collapse it. This also works in the read-only preview.
 - Only the rows near the viewport are rendered, so long files scroll, sort and search without the editor building a DOM for every row.
 - Full undo/redo through the standard `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`.
 

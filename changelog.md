@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Multi-line cells show one and a half lines by default in the editable grid
+  and large-file preview. Double-click toggles expansion without changing the
+  cell's contents, and scrolling accounts for the expanded row heights.
+
 ## [0.0.19] - 2026-09-06
 
 ### Fixed

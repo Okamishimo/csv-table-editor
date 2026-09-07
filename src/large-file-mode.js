@@ -12,6 +12,7 @@ const {
   watchFontFamily,
 } = require("./font-settings");
 const { buildFileIndex } = require("./large-file-index");
+const multiline = require("./multiline-cells");
 
 const MIB = 1024 * 1024;
 const SAMPLE_BYTES = 256 * 1024;
@@ -917,6 +918,7 @@ function getLargeFileWebviewHtml() {
   #preparing-fill { height: 100%; width: 0; background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); }
   table { border-collapse: collapse; min-width: 100%; white-space: nowrap; }
   th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 7px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+  ${multiline.previewCss}
   thead { position: sticky; top: 0; z-index: 2; background: var(--vscode-editorWidget-background); }
   th.row-number { position: sticky; left: 0; z-index: 1; text-align: right; color: var(--vscode-descriptionForeground); background: var(--vscode-editorWidget-background); }
   thead th.column-header { cursor: pointer; user-select: none; }
@@ -979,6 +981,9 @@ function getLargeFileWebviewHtml() {
   let indexSize = 0;
   let indexComplete = false;
   let rowHeight = 0;
+  ${multiline.createRowLayout.toString()}
+  const expandedLayout = createRowLayout();
+  const expandedRows = new Set();
   /** While a scan runs the view follows it, until the reader takes over. */
   let following = false;
   const filterDelayMs = 150;
@@ -1044,10 +1049,17 @@ function getLargeFileWebviewHtml() {
   function measureRowHeight() {
     const rows = byId('rows').rows;
     if (!rows.length) return rowHeight;
+    byId('rows').style.removeProperty('--csv-preview-row-height');
+    byId('rows').classList.add('csv-measuring');
     const height = rows[0].getBoundingClientRect().height;
+    // Pin the physical collapsed height as well as its arithmetic value. A
+    // minimum rounded down could still be exceeded by the cell's content.
+    if (height > 0) byId('rows').style.setProperty('--csv-preview-row-height', Math.ceil(height) + 'px');
+    const measured = rows[0].getBoundingClientRect().height;
+    byId('rows').classList.remove('csv-measuring');
     // Whole pixels: the spacers multiply this by millions of rows, and a
     // fraction repeated that often drifts the arithmetic away from the layout.
-    return height > 0 ? Math.round(height) : rowHeight;
+    return measured > 0 ? Math.round(measured) : rowHeight;
   }
 
   function setSpacer(id, height, columns) {
@@ -1069,9 +1081,9 @@ function getLargeFileWebviewHtml() {
     const firstRow = Number(rows[0].dataset.rowNumber);
     const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
     // Data rows are numbered from 2, so the file holds rows 2 .. totalRows + 1.
-    const above = (firstRow - 2) * rowHeight;
+    const above = expandedLayout.offset(firstRow - 2, rowHeight);
     setSpacer('space-above', above, columns);
-    setSpacer('space-below', (totalRows + 1 - lastRow) * rowHeight, columns);
+    setSpacer('space-below', expandedLayout.offset(totalRows, rowHeight) - expandedLayout.offset(lastRow - 1, rowHeight), columns);
     correctSpacerDrift(rows[0], firstRow, above, columns);
   }
 
@@ -1089,7 +1101,7 @@ function getLargeFileWebviewHtml() {
     if (!Number.isFinite(wrapTop) || !Number.isFinite(rowTop)) return;
     const head = document.querySelector('thead').getBoundingClientRect().height || 0;
     const actual = rowTop - wrapTop + tableWrap.scrollTop;
-    const expected = head + (firstRow - 2) * rowHeight;
+    const expected = head + expandedLayout.offset(firstRow - 2, rowHeight);
     const drift = expected - actual;
     // Only worth correcting once it could put the reader on the wrong row.
     if (Math.abs(drift) < 0.5 || Math.abs(drift) > rowHeight * maximumWindowRows) return;
@@ -1100,13 +1112,43 @@ function getLargeFileWebviewHtml() {
   function rowAtViewportTop() {
     const head = document.querySelector('thead').getBoundingClientRect().height || 0;
     const offset = Math.max(0, byId('table-wrap').scrollTop - head);
-    return Math.min(totalRows + 1, Math.floor(offset / rowHeight) + 2);
+    return expandedLayout.indexAt(offset, totalRows, rowHeight) + 2;
   }
 
   function scrollToRow(row) {
     const head = document.querySelector('thead').getBoundingClientRect().height || 0;
-    byId('table-wrap').scrollTop = Math.max(0, (row - 2) * rowHeight) + head;
+    byId('table-wrap').scrollTop = expandedLayout.offset(row - 2, rowHeight) + head;
   }
+
+  function measureExpandedRows() {
+    const body = byId('rows');
+    for (const row of expandedRows) {
+      if (!body.contains(row)) { expandedRows.delete(row); continue; }
+      const height = row.getBoundingClientRect().height;
+      if (height > 0) expandedLayout.set(Number(row.dataset.rowNumber) - 2, height - rowHeight);
+    }
+  }
+
+  byId('rows').addEventListener('dblclick', event => {
+    const cell = event.target.closest('td');
+    const content = cell && cell.querySelector('.csv-multiline');
+    if (!content) return;
+    event.preventDefault();
+    stopFollowing();
+    const row = cell.parentElement;
+    const open = content.classList.toggle('csv-expanded');
+    expandedRows.add(row);
+    measureExpandedRows();
+    if (!row.querySelector('.csv-expanded')) expandedRows.delete(row);
+    updateSpacers();
+    if (!open) {
+      const wrap = byId('table-wrap');
+      const visibleTop = wrap.getBoundingClientRect().top + document.querySelector('thead').getBoundingClientRect().height;
+      const rect = row.getBoundingClientRect();
+      if (rect.height > 0 && rect.bottom <= visibleTop) wrap.scrollTop += rect.top - visibleTop;
+    }
+    lastScrollTop = byId('table-wrap').scrollTop;
+  });
 
   function stopFollowing() {
     following = false;
@@ -1119,13 +1161,20 @@ function getLargeFileWebviewHtml() {
     // Find the first row below the sticky header without scanning the table.
     let low = 0;
     let high = rows.length - 1;
+    let measuredRow = null;
+    let measuredRect = null;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
-      if (rows[middle].getBoundingClientRect().bottom <= visibleTop) low = middle + 1;
-      else high = middle;
+      const rect = rows[middle].getBoundingClientRect();
+      if (rect.bottom <= visibleTop) low = middle + 1;
+      else {
+        high = middle;
+        measuredRow = rows[middle];
+        measuredRect = rect;
+      }
     }
     const row = rows[low];
-    return { row, top: row.getBoundingClientRect().top };
+    return { row, top: (row === measuredRow ? measuredRect : row.getBoundingClientRect()).top };
   }
 
   function render(page) {
@@ -1134,9 +1183,9 @@ function getLargeFileWebviewHtml() {
     const tableWrap = byId('table-wrap');
     const replacing = page.mode === 'replace';
     const prepending = page.mode === 'prepend';
-    // With the file's height on the spacers every row already sits at its own
-    // offset, so inserting and evicting rows cannot move anything.
-    const anchor = replacing || absoluteScrolling()
+    // Evicting an expanded row removes its extra height. Keep a measured
+    // visible anchor even when the file's collapsed height is already known.
+    const anchor = replacing
       ? null
       : captureScrollAnchor(body, tableWrap, head);
     const scrollLeft = tableWrap.scrollLeft;
@@ -1157,7 +1206,16 @@ function getLargeFileWebviewHtml() {
       });
       head.appendChild(headerRow);
     }
-    if (replacing) body.replaceChildren();
+    if (replacing) {
+      // A direct jump keeps its logical row when the old window's expanded
+      // cells disappear. Expansion state stays bounded to the loaded window.
+      const wanted = absoluteScrolling() ? rowAtViewportTop() : 0;
+      const delta = wanted ? expandedLayout.offset(wanted - 2, rowHeight) - (wanted - 2) * rowHeight : 0;
+      expandedRows.clear();
+      expandedLayout.clear();
+      body.replaceChildren();
+      if (page.keepScroll && delta) tableWrap.scrollTop -= delta;
+    }
 
     const fragment = document.createDocumentFragment();
     page.rows.forEach((row, index) => {
@@ -1173,7 +1231,12 @@ function getLargeFileWebviewHtml() {
       for (let column = 0; column < columns; column++) {
         const value = row[column] == null ? '' : row[column];
         const cell = document.createElement('td');
-        cell.textContent = value;
+        if (/[\\r\\n]/.test(value)) {
+          const content = document.createElement('div');
+          content.className = 'csv-multiline';
+          content.textContent = value;
+          cell.appendChild(content);
+        } else cell.textContent = value;
         // The tooltip is attached on first hover instead; see below.
         tr.appendChild(cell);
       }
@@ -1202,6 +1265,9 @@ function getLargeFileWebviewHtml() {
       for (const row of doomed) row.remove();
     }
     rowHeight = measureRowHeight();
+    if (body.rows.length) expandedLayout.retain(Number(body.rows[0].dataset.rowNumber) - 2,
+      Number(body.rows[body.rows.length - 1].dataset.rowNumber) - 1);
+    measureExpandedRows();
     updateSpacers();
     if (replacing) {
       if (page.follow && absoluteScrolling()) scrollToRow(page.startRow);

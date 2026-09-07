@@ -12,9 +12,8 @@
  *
  * This module renders only the rows near the viewport and stands two spacer
  * rows in for the rest, so the scrollbar keeps representing the whole file.
- * Row height is uniform (the stylesheet fixes cells at 26px and forbids
- * wrapping), which is what makes the spacer arithmetic exact; the height is
- * still measured rather than assumed, so a large interface font stays correct.
+ * Collapsed rows reserve one and a half lines. Explicitly expanded cells add
+ * sparse height corrections to the measured base height and spacer arithmetic.
  *
  * It runs last in the decorator chain, so its anchors are the text produced by
  * `font-settings`, `search-scope` and `grid-performance`. In particular it
@@ -29,6 +28,7 @@
 const MARKER = "function csvWindowRange()";
 const OVERSCAN_ROWS = 10;
 const ESTIMATED_ROW_HEIGHT = 26;
+const multiline = require("./multiline-cells");
 
 function replaceOnce(source, from, to, description) {
   const occurrences = source.split(from).length - 1;
@@ -56,6 +56,7 @@ function decorateWebviewHtml(html) {
       "  /* Stand-ins for the rows outside the rendered window. Their height is",
       "     set through the CSSOM, which the style-src nonce policy allows. */",
       "  tr.csv-spacer td { padding: 0; border: 0; min-width: 0; height: 0; }",
+      multiline.editableCss,
     ].join("\n"),
     "grid scroller rule"
   );
@@ -91,6 +92,10 @@ function decorateWebviewHtml(html) {
       "   *  layout sizes columns from the rows it can see, so without this the",
       "   *  whole table would resize every time scrolling swapped the rows. */",
       "  let csvColumnWidths = null;",
+      multiline.createRowLayout.toString(),
+      multiline.readEditableCell.toString(),
+      multiline.installEditableMultiline.toString(),
+      "  const csvMultiline = installEditableMultiline();",
       "",
       "  function lockCsvColumnWidths() {",
       "    const headerRowEl = theadEl.rows[0];",
@@ -118,6 +123,7 @@ function decorateWebviewHtml(html) {
       "  }",
       "",
       "  function rebuildCsvDisplayOrder() {",
+      "    csvMultiline.reset();",
       "    csvDisplayOrder = [];",
       "    for (let r = 0; r < headerRow; r++) { csvDisplayOrder.push(r); }",
       "    csvDisplayOrder.push(headerRow);",
@@ -142,19 +148,29 @@ function decorateWebviewHtml(html) {
       "    if (!viewport || !csvRowHeight) { return { start: 0, end: total }; }",
       "    const visible = Math.ceil(viewport / csvRowHeight) + CSV_OVERSCAN_ROWS * 2;",
       "    if (visible >= total) { return { start: 0, end: total }; }",
-      "    const first = Math.floor(csvGridWrapEl.scrollTop / csvRowHeight) - CSV_OVERSCAN_ROWS;",
+      "    const first = csvMultiline.layout.indexAt(csvGridWrapEl.scrollTop, total, csvRowHeight) - CSV_OVERSCAN_ROWS;",
       "    const start = Math.max(0, Math.min(total - visible, first));",
       "    return { start: start, end: start + visible };",
       "  }",
       "",
       "  function measureCsvRowHeight() {",
+      "    csvTableEl.classList.add('csv-measuring');",
       "    const rows = tbodyEl.rows;",
       "    for (let i = 0; i < rows.length; i++) {",
       "      if (rows[i].className === 'csv-spacer') { continue; }",
       "      const height = rows[i].getBoundingClientRect().height;",
-      "      if (height > 0) { return height; }",
+      "      if (height > 0) { csvTableEl.classList.remove('csv-measuring'); return height; }",
       "    }",
+      "    csvTableEl.classList.remove('csv-measuring');",
       "    return 0;",
+      "  }",
+      "  function updateCsvSpacers() {",
+      "    const rows = tbodyEl.rows;",
+      "    if (rows.length < 2) return;",
+      "    const offset = (position) => csvMultiline.layout.offset(position, csvRowHeight);",
+      "    rows[0].cells[0].style.height = offset(csvRenderedStart) + 'px';",
+      "    rows[rows.length - 1].cells[0].style.height =",
+      "      (offset(csvDisplayOrder.length) - offset(csvRenderedEnd)) + 'px';",
       "  }",
       "",
       "  /** Rebuild tbody for one window. Highlights are the caller's business,",
@@ -167,17 +183,14 @@ function decorateWebviewHtml(html) {
       "    }",
       "    body += '<tr class=\"csv-spacer\"><td></td></tr>';",
       "    tbodyEl.innerHTML = body;",
-      "    const rows = tbodyEl.rows;",
-      "    // Inline style attributes are refused by the content security policy;",
-      "    // assigning through the CSSOM is not.",
-      "    rows[0].cells[0].style.height = (range.start * csvRowHeight) + 'px';",
-      "    rows[rows.length - 1].cells[0].style.height =",
-      "      ((csvDisplayOrder.length - range.end) * csvRowHeight) + 'px';",
       "    csvRenderedStart = range.start;",
       "    csvRenderedEnd = range.end;",
       "    // The tbody was replaced: rebuild the row index and drop the element",
       "    // references the previous highlights were holding.",
       "    rebuildCsvRowIndex();",
+      "    csvMultiline.restore();",
+      "    csvMultiline.measure();",
+      "    updateCsvSpacers();",
       "    csvHighlightedMatches = [];",
       "    csvHighlightedSelection = [];",
       "    csvCurrentMatchCell = null;",
@@ -200,7 +213,7 @@ function decorateWebviewHtml(html) {
       "    const position = csvDisplayPositions.get(r);",
       "    if (position === undefined) { return; }",
       "    csvGridWrapEl.scrollTop = Math.max(0,",
-      "      position * csvRowHeight - csvGridWrapEl.clientHeight / 2);",
+      "      csvMultiline.layout.offset(position, csvRowHeight) - csvGridWrapEl.clientHeight / 2);",
       "    paintCsvWindowMeasured(csvWindowRange());",
       "  }",
       "",
@@ -215,10 +228,7 @@ function decorateWebviewHtml(html) {
       "    const r = +td.dataset.r;",
       "    const c = +td.dataset.c;",
       "    csvFocusedCell = { r: r, c: c };",
-      "    // innerText is what the focusout handler commits; fall back to",
-      "    // textContent where the host does not implement it.",
-      "    const raw = typeof cell.innerText === 'string' ? cell.innerText : cell.textContent;",
-      "    const value = raw.replace(/\\n$/, '');",
+      "    const value = readEditableCell(cell, grid[r] && grid[r][c]);",
       "    if (grid[r] && grid[r][c] !== value) {",
       "      const prev = snapshot();",
       "      grid[r][c] = value;",
@@ -420,6 +430,11 @@ function decorateWebviewHtml(html) {
     "current-match focus"
   );
 
+  decorated = replaceOnce(decorated,
+    "    const newVal = cell.innerText.replace(/\\n$/, '');",
+    "    const newVal = readEditableCell(cell, grid[r] && grid[r][c]);",
+    "multiline edit reader"
+  );
   return decorated;
 }
 
