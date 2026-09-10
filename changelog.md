@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.21] - 2026-09-11
+
 ### Fixed
 
 - Opening a large file in the read-only preview is quick again. Version 0.0.20
