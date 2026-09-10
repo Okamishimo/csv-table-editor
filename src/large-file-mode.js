@@ -971,6 +971,14 @@ function getLargeFileWebviewHtml() {
   const byId = id => document.getElementById(id);
   const maximumWindowRows = 500;
   const autoloadDistance = 400;
+  /** The tallest element a browser will lay out. Chromium saturates its layout
+   *  units a little above 33.5 million pixels, and a scroller asked for more
+   *  simply stops growing: the thumb then measures the ceiling rather than the
+   *  file, so dragging it to the middle of a ten-million-row file lands a
+   *  tenth of the way in and the rows past the ceiling cannot be reached at
+   *  all. Half of that is comfortably within every engine's limit, and a file
+   *  taller than it shares this height between its placeholders instead. */
+  const maximumScrollerHeight = 16777216;
   /** Rows kept between the edge of the window and the edge of the viewport
    *  before the next page is fetched. */
   const prefetchRows = 30;
@@ -981,6 +989,15 @@ function getLargeFileWebviewHtml() {
   let indexSize = 0;
   let indexComplete = false;
   let rowHeight = 0;
+  /**
+   * How the scroller is laid out over the file. The window begins at base and
+   * is height tall, both in the file's own pixels. The placeholders standing
+   * for everything else are top and below, and they are the file's pixels too
+   * until the file is taller than a browser will lay out, at which point they
+   * carry base and rest at a smaller scale. The window itself always keeps the
+   * file's scale, so scrolling through loaded rows stays one-to-one.
+   */
+  const scroller = { top: 0, height: 0, base: 0, below: 0, rest: 0 };
   ${multiline.createRowLayout.toString()}
   const expandedLayout = createRowLayout();
   const expandedRows = new Set();
@@ -990,8 +1007,12 @@ function getLargeFileWebviewHtml() {
   /** How long the scroller must be still before its window is loaded. A wheel
    *  gesture emits events for as long as it lasts, and its momentum for longer
    *  still; loading each one would page through windows the reader has already
-   *  left behind. */
-  const scrollSettleMs = 120;
+   *  left behind. It must outlast a hand as well as a gesture: a thumb held on
+   *  the scrollbar of a half-million-row file is never perfectly still, one
+   *  pixel of tremor is several hundred rows, and at a shorter delay each
+   *  tremor loaded a window of its own and the view flickered between places
+   *  hundreds of rows apart for as long as the reader held on. */
+  const scrollSettleMs = 260;
   let loading = false;
   let pageRequested = false;
   let reachedEnd = false;
@@ -1074,6 +1095,11 @@ function getLargeFileWebviewHtml() {
     const rows = byId('rows').rows;
     const columns = (document.querySelector('thead tr') || { cells: [] }).cells.length || 1;
     if (!absoluteScrolling() || !rows.length) {
+      scroller.top = 0;
+      scroller.height = 0;
+      scroller.base = 0;
+      scroller.below = 0;
+      scroller.rest = 0;
       setSpacer('space-above', 0, columns);
       setSpacer('space-below', 0, columns);
       return;
@@ -1081,10 +1107,52 @@ function getLargeFileWebviewHtml() {
     const firstRow = Number(rows[0].dataset.rowNumber);
     const lastRow = Number(rows[rows.length - 1].dataset.rowNumber);
     // Data rows are numbered from 2, so the file holds rows 2 .. totalRows + 1.
-    const above = expandedLayout.offset(firstRow - 2, rowHeight);
-    setSpacer('space-above', above, columns);
-    setSpacer('space-below', expandedLayout.offset(totalRows, rowHeight) - expandedLayout.offset(lastRow - 1, rowHeight), columns);
-    correctSpacerDrift(rows[0], firstRow, above, columns);
+    const fileHeight = expandedLayout.offset(totalRows, rowHeight);
+    scroller.base = expandedLayout.offset(firstRow - 2, rowHeight);
+    scroller.height = expandedLayout.offset(lastRow - 1, rowHeight) - scroller.base;
+    scroller.rest = Math.max(0, fileHeight - scroller.base - scroller.height);
+    // The two placeholders share whatever the scroller has left. A file the
+    // browser can lay out gets the file's own pixels, and a taller one gets
+    // the same share of a scroller it can lay out, so the thumb still says
+    // where in the file the reader is.
+    const outside = scroller.base + scroller.rest;
+    const travel = Math.max(0, Math.min(fileHeight, maximumScrollerHeight) - scroller.height);
+    scroller.top = outside > 0 ? Math.round(scroller.base * Math.min(1, travel / outside)) : 0;
+    scroller.below = Math.max(0, travel - scroller.top);
+    setSpacer('space-above', scroller.top, columns);
+    setSpacer('space-below', scroller.below, columns);
+    correctSpacerDrift(rows[0], columns);
+  }
+
+  /**
+   * The file offset a scroller offset points at, and the scroller offset a row
+   * is drawn at. The loaded window keeps the file's scale, so reading through
+   * it is one-to-one; the placeholders on either side carry the rest of the
+   * file, compressed together when it is taller than a browser will lay out.
+   * The two are exact inverses, and both are the identity while nothing is
+   * compressed.
+   */
+  function fileOffsetAt(offset) {
+    const within = offset - scroller.top;
+    if (within <= 0) {
+      return scroller.top > 0 ? Math.max(0, offset) / scroller.top * scroller.base : 0;
+    }
+    if (within < scroller.height) return scroller.base + within;
+    const past = within - scroller.height;
+    const reached = scroller.base + scroller.height;
+    if (scroller.below <= 0) return reached;
+    return reached + Math.min(1, past / scroller.below) * scroller.rest;
+  }
+
+  function scrollerOffsetOf(row) {
+    const at = expandedLayout.offset(row - 2, rowHeight);
+    const within = at - scroller.base;
+    if (within <= 0) return scroller.base > 0 ? Math.max(0, at) / scroller.base * scroller.top : 0;
+    if (within < scroller.height) return scroller.top + within;
+    const past = within - scroller.height;
+    const reached = scroller.top + scroller.height;
+    if (scroller.rest <= 0) return reached;
+    return reached + Math.min(1, past / scroller.rest) * scroller.below;
   }
 
   /**
@@ -1094,30 +1162,31 @@ function getLargeFileWebviewHtml() {
    * uncorrected the preview asks for a window it is already showing, which is
    * a request that answers itself for ever.
    */
-  function correctSpacerDrift(firstRowElement, firstRow, above, columns) {
+  function correctSpacerDrift(firstRowElement, columns) {
     const tableWrap = byId('table-wrap');
     const wrapTop = tableWrap.getBoundingClientRect().top;
     const rowTop = firstRowElement.getBoundingClientRect().top;
     if (!Number.isFinite(wrapTop) || !Number.isFinite(rowTop)) return;
     const head = document.querySelector('thead').getBoundingClientRect().height || 0;
     const actual = rowTop - wrapTop + tableWrap.scrollTop;
-    const expected = head + expandedLayout.offset(firstRow - 2, rowHeight);
+    const expected = head + scroller.top;
     const drift = expected - actual;
     // Only worth correcting once it could put the reader on the wrong row.
     if (Math.abs(drift) < 0.5 || Math.abs(drift) > rowHeight * maximumWindowRows) return;
-    setSpacer('space-above', above + drift, columns);
+    scroller.top += drift;
+    setSpacer('space-above', scroller.top, columns);
   }
 
   /** The data row at the top of the viewport. */
   function rowAtViewportTop() {
     const head = document.querySelector('thead').getBoundingClientRect().height || 0;
     const offset = Math.max(0, byId('table-wrap').scrollTop - head);
-    return expandedLayout.indexAt(offset, totalRows, rowHeight) + 2;
+    return expandedLayout.indexAt(Math.max(0, fileOffsetAt(offset)), totalRows, rowHeight) + 2;
   }
 
   function scrollToRow(row) {
     const head = document.querySelector('thead').getBoundingClientRect().height || 0;
-    byId('table-wrap').scrollTop = expandedLayout.offset(row - 2, rowHeight) + head;
+    byId('table-wrap').scrollTop = scrollerOffsetOf(row) + head;
   }
 
   function measureExpandedRows() {
@@ -1188,6 +1257,18 @@ function getLargeFileWebviewHtml() {
     const anchor = replacing
       ? null
       : captureScrollAnchor(body, tableWrap, head);
+    // A jump keeps the row the reader dropped the thumb on, which the new
+    // window need not draw in the same place: the old window's expanded cells
+    // go with it, and a compressed scroller gives the new window its own share
+    // of the bar. Remember the row and how far into it they are, and put them
+    // back on it once the placeholders have been rebuilt around it.
+    const keeping = replacing && page.keepScroll && absoluteScrolling()
+      ? { row: rowAtViewportTop(), into: 0 }
+      : null;
+    if (keeping) {
+      keeping.into = tableWrap.scrollTop
+        - (head.getBoundingClientRect().height || 0) - scrollerOffsetOf(keeping.row);
+    }
     const scrollLeft = tableWrap.scrollLeft;
     if (replacing || !head.firstChild) {
       head.replaceChildren();
@@ -1207,14 +1288,10 @@ function getLargeFileWebviewHtml() {
       head.appendChild(headerRow);
     }
     if (replacing) {
-      // A direct jump keeps its logical row when the old window's expanded
-      // cells disappear. Expansion state stays bounded to the loaded window.
-      const wanted = absoluteScrolling() ? rowAtViewportTop() : 0;
-      const delta = wanted ? expandedLayout.offset(wanted - 2, rowHeight) - (wanted - 2) * rowHeight : 0;
+      // Expansion state stays bounded to the loaded window.
       expandedRows.clear();
       expandedLayout.clear();
       body.replaceChildren();
-      if (page.keepScroll && delta) tableWrap.scrollTop -= delta;
     }
 
     const fragment = document.createDocumentFragment();
@@ -1273,7 +1350,10 @@ function getLargeFileWebviewHtml() {
       if (page.follow && absoluteScrolling()) scrollToRow(page.startRow);
       // A jump the reader made by dragging the scrollbar is already where they
       // put it; only a genuinely new window starts at the top.
-      else if (!page.keepScroll && !page.focus) tableWrap.scrollTop = 0;
+      else if (keeping) {
+        tableWrap.scrollTop = scrollerOffsetOf(keeping.row)
+          + (head.getBoundingClientRect().height || 0) + keeping.into;
+      } else if (!page.keepScroll && !page.focus) tableWrap.scrollTop = 0;
     } else if (anchor && body.contains(anchor.row)) {
       // Measure the retained row after layout, including any browser scroll
       // clamping when a short final page makes the rolling window smaller.
@@ -1292,8 +1372,7 @@ function getLargeFileWebviewHtml() {
       firstPageNumber = Number(firstVisibleRow.dataset.pageNumber);
       lastPageNumber = Number(lastVisibleRow.dataset.pageNumber);
       reachedEnd = lastVisibleRow.dataset.pageDone === 'true';
-      byId('status').textContent = 'Rows ' + firstVisibleRow.dataset.rowNumber + '–' +
-        lastVisibleRow.dataset.rowNumber + rowTotalLabel() + (reachedEnd ? ' · End' : '');
+      reportLoadedWindow();
     } else {
       firstPageNumber = 0;
       lastPageNumber = 0;
@@ -1747,6 +1826,29 @@ function getLargeFileWebviewHtml() {
     else if (!scrollingUp && remaining <= autoloadDistance) requestNextPage();
   }
 
+  /** What the loaded window holds, which is what the status line says
+   *  whenever the reader is looking at it. */
+  function reportLoadedWindow() {
+    const rows = byId('rows').rows;
+    if (!rows.length) return;
+    byId('status').textContent = 'Rows ' + rows[0].dataset.rowNumber + '–' +
+      rows[rows.length - 1].dataset.rowNumber + rowTotalLabel() + (reachedEnd ? ' · End' : '');
+  }
+
+  /** Say which row the scroller is now over, while the reader is still
+   *  moving. Costs no loading and no layout beyond the arithmetic: the window
+   *  it names is fetched only once they stop. */
+  function reportScrollPosition() {
+    if (preparing || !absoluteScrolling()) return;
+    const rows = byId('rows').rows;
+    if (!rows.length) return;
+    const wanted = rowAtViewportTop();
+    // Back inside the loaded window, what is on screen is the better answer.
+    if (wanted >= Number(rows[0].dataset.rowNumber)
+      && wanted <= Number(rows[rows.length - 1].dataset.rowNumber)) reportLoadedWindow();
+    else byId('status').textContent = 'Row ' + wanted.toLocaleString() + rowTotalLabel();
+  }
+
   function scheduleMaybeLoadMore() {
     const tableWrap = byId('table-wrap');
     // A scroll event caused by render's compensation is not another user scroll.
@@ -1756,6 +1858,10 @@ function getLargeFileWebviewHtml() {
     // Scrolling is the reader taking over from a scan that was following along.
     stopFollowing();
     lastRequestedRow = -1;
+    // A scrollbar spanning a long file moves hundreds of rows per pixel, and
+    // loading waits for the reader to stop, so say where the thumb is now or
+    // they are dragging it blind.
+    reportScrollPosition();
     // Where they end up is what they asked to read, so wait for the scrollbar
     // to stop before loading anything.
     clearTimeout(scrollSettleTimer);
@@ -1802,12 +1908,7 @@ function getLargeFileWebviewHtml() {
       showPreparing(message);
       rowHeight = measureRowHeight();
       updateSpacers();
-      const rows = byId('rows').rows;
-      if (rows.length) {
-        byId('status').textContent = 'Rows ' + rows[0].dataset.rowNumber + '–' +
-          rows[rows.length - 1].dataset.rowNumber + rowTotalLabel() +
-          (reachedEnd ? ' · End' : '');
-      }
+      reportLoadedWindow();
     } else if (message.type === 'searchStarted') {
       // A scan for an older query may still be reporting; ignore it from here.
       if (message.query === fileSearchQuery) updateMatchCount();

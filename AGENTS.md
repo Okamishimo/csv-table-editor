@@ -219,6 +219,22 @@ Large-file protections are correctness requirements, not optional tuning.
   the whole file, evicting a page turns its rows into placeholder height rather
   than moving anything, and no scroll compensation is needed. Without the count
   the preview falls back to describing only the loaded window.
+- A browser will not lay out an element taller than its layout units reach:
+  Chromium saturates a little above 33.5 million pixels, which is about a
+  million rows. A scroller asked for more silently stops growing, and the thumb
+  then measures the ceiling rather than the file, so dragging it to the middle
+  lands a tenth of the way in and everything past the ceiling cannot be reached
+  at all. The scroller is therefore capped at a height every engine lays out,
+  and a file taller than that shares that height between its two placeholders.
+  The loaded window always keeps the file's own scale, so reading through it
+  stays one for one; only the placeholders are compressed. Do not give the
+  placeholders the file's raw height again, and keep the offset-to-row map and
+  the row-to-offset map exact inverses of each other: the reader's position is
+  read back through them on every scroll.
+- A jump that replaces the window puts the reader back on the row they dragged
+  to, which is also what discards the old window's expanded row heights. The
+  new window is placed at its own share of a compressed scroller, so the row
+  must be carried across the rebuild rather than the scroll offset alone.
 - Page offsets make any page directly reachable, so dragging the scrollbar loads
   where the reader actually is instead of paging there. A jump the reader made
   keeps its scroll position.
@@ -276,6 +292,18 @@ Large-file protections are correctness requirements, not optional tuning.
   is never asked for. Reconciliation after a load defers to a gesture still in
   flight. Rendering, searching, or filtering must not start an uncontrolled
   page-request chain.
+- The settle delay must outlast a hand, not only a gesture. A scrollbar over a
+  long file is coarse: the thumb sits at its minimum size, so one pixel of
+  pointer movement is worth several hundred rows. A hand holding the thumb is
+  never still, and at a short delay every tremor became a window of its own and
+  the view flickered between places hundreds of rows apart for as long as the
+  reader held on. Do not shorten it back towards a wheel gesture's timing.
+- The reader must be able to aim a scrollbar that coarse, so while the scroller
+  is moving the status line names the row the thumb is over. Saying so must
+  cost nothing: no request, and no layout beyond the arithmetic already used to
+  decide which row that is. Once the reader is back inside the loaded window
+  the status line describes that window again, because what is on screen is the
+  better answer.
 - The editable grid renders only the rows near the viewport, with two spacer
   rows standing in for the rest so the scrollbar keeps measuring the whole
   file. Measure the row height instead of assuming it, and render every row
