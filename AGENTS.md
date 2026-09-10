@@ -242,6 +242,14 @@ Large-file protections are correctness requirements, not optional tuning.
   rendered row and correct the placeholder above it, because table layout rounds
   heights its own way and the arithmetic drifts from the layout over millions of
   rows. Round the row height to whole pixels for the same reason.
+- Pinning that height is expensive and must stay rare. It unsets the pinned
+  property, toggles a class over the whole window and lays it out twice, which
+  on a wide file is a tenth of a second for a hundred rows. Read the height
+  first and re-pin only when it disagrees, and never pin for something that
+  cannot have changed it: the host reports its progress once per megabyte, so a
+  multi-gigabyte file reports thousands of times, and measuring for each report
+  turned a three-second read into well over a minute. The same cost was paid
+  for every page a scan swept past.
 - Loading must converge. A window that does not cover the reader is accepted
   rather than requested again: only the reader moving makes another request
   worth making. Without that, a mismatch the answer cannot fix becomes a request

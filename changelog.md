@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Opening a large file in the read-only preview is quick again. Version 0.0.20
+  re-measured and re-pinned the whole rendered window every time the host
+  reported how far it had read the file, which it does once per megabyte: for a
+  1.8 GB file that is about 1,840 reports, each laying the window out twice.
+  A three-second read became well over a minute, and the same cost was paid for
+  every page a search swept past. The height is now read cheaply and re-pinned
+  only when it has really changed, and a report of progress measures nothing.
+
 ## [0.0.20] - 2026-09-10
 
 ### Fixed
