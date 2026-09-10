@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.20] - 2026-09-10
+
+### Fixed
+
+- Dragging the read-only preview's scrollbar no longer sends the view leaping
+  back and forth while you hold the thumb. A scrollbar over half a million rows
+  moves several hundred rows for every pixel of pointer movement, so the tremor
+  of a hand holding the thumb was loading a fresh window every fraction of a
+  second. Loading now waits for the hand as well as the gesture, and the status
+  line names the row the thumb is over while you are still dragging, so you can
+  aim before letting go.
+- The read-only preview's scrollbar measures the whole file however long it is.
+  A browser will not lay out a scroller taller than about 33 million pixels —
+  roughly a million rows — and past that the thumb measured the ceiling instead
+  of the file: dragging it to the middle of a multi-million-row file landed a
+  tenth of the way in, and the rest of the file could not be reached at all.
+  Such a file now shares a scroller the browser can draw between the rows above
+  and below the loaded window, and a jump puts the reader on the row the thumb
+  pointed at. Rows in the loaded window keep their real height, so reading
+  through the window is unchanged.
+
 ### Changed
 
 - Multi-line cells show one and a half lines by default in the editable grid

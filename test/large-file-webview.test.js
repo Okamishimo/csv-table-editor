@@ -35,7 +35,7 @@ async function scrollToRow(wrap, window, offset) {
 }
 
 /** Loading waits for the scrollbar to stop, so a test must wait with it. */
-const SCROLL_SETTLE_MS = 120;
+const SCROLL_SETTLE_MS = 260;
 const settle = (window) =>
   new Promise((resolve) => window.setTimeout(resolve, SCROLL_SETTLE_MS + 60));
 
@@ -1248,6 +1248,85 @@ test("dragging the scrollbar far away loads that part of the file and stays ther
   assert.match(document.getElementById("status").textContent, /of 10,000/);
 });
 
+/** The tallest scroller the preview builds, because it is the tallest element
+ *  a browser will lay out. */
+const MAXIMUM_SCROLLER = 16777216;
+
+/** The row the scroller is parked on: the one at the very top of the scroll
+ *  port, which the sticky header overlays. Read from the layout rather than
+ *  from the preview's own arithmetic about it. */
+function rowAtTheTop(document) {
+  for (const row of document.getElementById("rows").rows) {
+    if (row.getBoundingClientRect().bottom > 0) return Number(row.dataset.rowNumber);
+  }
+  return 0;
+}
+
+/** The height of everything the scroller holds: the two placeholders and the
+ *  rows between them. */
+function scrollerHeight(document) {
+  const spacer = (id) =>
+    Number.parseFloat(document.getElementById(id).rows[0].cells[0].style.height) || 0;
+  return spacer("space-above") + document.getElementById("rows").rows.length * ROW_HEIGHT
+    + spacer("space-below");
+}
+
+test("a file taller than a browser will lay out still gets a scrollbar that measures it", async (t) => {
+  const { document, page, index, scrollTo, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  // Two million rows is forty million pixels: more than a browser will lay
+  // out, so the scroller carries the file at a smaller scale instead.
+  index(2000000);
+  assert.equal(scrollerHeight(document), MAXIMUM_SCROLLER,
+    "the scroller stops at the height a browser can draw");
+
+  await scrollTo(Math.round((MAXIMUM_SCROLLER - VIEWPORT) / 2));
+  const asked = postedMessages.at(-1);
+  assert.equal(asked.type, "gotoRow");
+  assert.ok(Math.abs(asked.row - 1000000) < 1000,
+    `halfway down the bar is halfway through the file, not row ${asked.row}`);
+
+  page(Math.floor((asked.row - 2) / 100) + 1, "replace", { keepScroll: true });
+  assert.equal(rowAtTheTop(document), asked.row,
+    "and the reader lands on the row the thumb pointed at");
+  assert.equal(scrollerHeight(document), MAXIMUM_SCROLLER,
+    "with the scroller still measuring the whole file");
+});
+
+test("the end of a file too tall to lay out is still reachable", async (t) => {
+  const { page, index, scrollTo, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(2000000);
+
+  await scrollTo(MAXIMUM_SCROLLER - VIEWPORT);
+  const asked = postedMessages.at(-1);
+  assert.equal(asked.type, "gotoRow");
+  assert.ok(asked.row > 1999000,
+    `the bottom of the bar reaches the end of the file, not row ${asked.row}`);
+});
+
+test("a compressed scroller still reads one row at a time inside the window", async (t) => {
+  const { document, send, wrap, page, index, scrollTo, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(2000000);
+  await scrollTo(Math.round((MAXIMUM_SCROLLER - VIEWPORT) / 2));
+
+  const jumped = postedMessages.at(-1);
+  const pageNumber = Math.floor((jumped.row - 2) / 100) + 1;
+  page(pageNumber, "replace", { keepScroll: true });
+  page(pageNumber + 1, "append");
+  send({ type: "loading", loading: false });
+  const landed = rowAtTheTop(document);
+  const jumps = () => postedMessages.filter((message) => message.type === "gotoRow").length;
+  const before = jumps();
+
+  // The placeholders are compressed; the loaded rows are not. Three rows of
+  // the scroller are three rows of the file, or the reader could never read.
+  await scrollTo(wrap.scrollTop + 3 * ROW_HEIGHT);
+  assert.equal(rowAtTheTop(document), landed + 3, "three rows down is three rows on");
+  assert.equal(jumps(), before, "and a few rows inside the window is not a jump elsewhere");
+});
+
 test("a jump that lands near the bottom of its window fills the rest of the screen", async (t) => {
   const { send, document, page, index, scrollTo, offsetOfRow, postedMessages, wrap } =
     openMeasuredPreview(t);
@@ -1405,6 +1484,44 @@ test("finding a match stops the view chasing the scan", async (t) => {
   assert.equal(wrap.scrollTop, settled, "a result is more interesting than the sweep");
   assert.equal(document.getElementById("rows").rows[0].dataset.rowNumber, "2",
     "the reader keeps looking at the match, not the scan");
+});
+
+test("a hand holding the scrollbar loads one window, not one for every tremor", async (t) => {
+  const { window, wrap, page, index, offsetOfRow, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(500000);
+
+  // A thumb held near the middle of a half-million-row file. One pixel of hand
+  // tremor is several hundred rows there, and a hand shakes every so often.
+  const asked = () => postedMessages.filter((message) => message.type === "gotoRow");
+  for (const row of [250000, 250700, 250000, 250700, 250000]) {
+    wrap.scrollTop = offsetOfRow(row);
+    wrap.dispatchEvent(new window.Event("scroll"));
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+  }
+  assert.equal(asked().length, 0, "nothing is fetched while the hand is still on the thumb");
+
+  await settle(window);
+  assert.equal(asked().length, 1, "and letting go asks once");
+  assert.equal(asked()[0].row, 250000, "for the place they let go of");
+});
+
+test("the status line says where the thumb is while the reader is still dragging", async (t) => {
+  const { window, document, wrap, page, index, offsetOfRow, postedMessages } = openMeasuredPreview(t);
+  page(1, "replace");
+  index(500000);
+  const status = () => document.getElementById("status").textContent;
+
+  wrap.scrollTop = offsetOfRow(250000);
+  wrap.dispatchEvent(new window.Event("scroll"));
+  assert.equal(status(), "Row 250,000 of 500,000",
+    "so a scrollbar worth hundreds of rows a pixel can be aimed before letting go");
+  assert.equal(postedMessages.at(-1).type, "ready", "and saying so fetches nothing");
+
+  // Inside the loaded window it keeps describing what is actually on screen.
+  wrap.scrollTop = offsetOfRow(40);
+  wrap.dispatchEvent(new window.Event("scroll"));
+  assert.match(status(), /^Rows 2–101 of 500,000/);
 });
 
 test("a wheel gesture loads where it stops, not every window it passes", async (t) => {
