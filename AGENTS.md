@@ -559,6 +559,11 @@ be included or bundled: packaging uses `--no-dependencies`.
   `GITHUB_TOKEN`; no custom PAT or Marketplace Secret is required. The workflow
   builds, tests, checks patch idempotency, packages, verifies contents, and
   uploads the canonical VSIX plus `.vsix.sha256`.
+- A merge is not proof the checks passed: this plan cannot require them before
+  one. `merge-release.yml` reads the merged PR's head commit and refuses to tag
+  or publish unless the latest `PR policy` and `Verify` runs on it both
+  completed successfully. Keep that refusal closed: a check still running, one
+  that never ran, and an unreadable checks API are all refusals.
 - Keep concurrency keyed to the release tag, without cancelling an active
   publication. Duplicate tag/release events must skip packaging when both
   assets are already uploaded; they may finish publication of that same draft.

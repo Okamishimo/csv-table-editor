@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Merging a pull request before its checks have finished no longer publishes
+  anything. This repository's plan cannot require the checks server side, so the
+  merge button stays available while `Verify` is still running; the merge
+  workflow now reads the merged commit's own check runs and refuses to create a
+  tag, package or release unless `PR policy` and `Verify` both completed
+  successfully on it.
+
 ## [0.0.20] - 2026-09-10
 
 ### Fixed

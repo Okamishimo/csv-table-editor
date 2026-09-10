@@ -10,6 +10,9 @@ const { prKind, checkPr, validateTitle, assertOnMain, ensureTagTarget, tagMerged
 const { checkPush } = require("../scripts/pre-push");
 
 const manifest = { version: "0.0.16" };
+/** Both required checks, finished and green, on the commit that was merged. */
+const checksPassed = () => [{ name: "PR policy", status: "completed", conclusion: "success" },
+  { name: "Verify", status: "completed", conclusion: "success" }];
 const lock = { ...manifest, packages: { "": manifest } };
 
 test("release titles require a stable matching new version and description", () => {
@@ -99,8 +102,11 @@ test("a merged PR tags its exact commit once, retries safely and never tags a la
   const repository = "Okamishimo/csv-table-editor";
   const commit = "a".repeat(40);
   const later = "b".repeat(40);
+  const head = "c".repeat(40);
   const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
-    title: "Release v0.0.16: release policy", merge_commit_sha: commit };
+    head: { sha: head }, title: "Release v0.0.16: release policy", merge_commit_sha: commit };
+  const passed = () => [{ name: "PR policy", status: "completed", conclusion: "success" },
+    { name: "Verify", status: "completed", conclusion: "success" }];
   const mutations = [];
   let existing = null;
   let onMain = true;
@@ -123,15 +129,77 @@ test("a merged PR tags its exact commit once, retries safely and never tags a la
     return commit;
   };
   const create = (tag, target) => { mutations.push({ tag, target }); existing = target; };
-  assert.deepEqual(tagMergedPr(pr, repository, git, create), { kind: "release", tag: "v0.0.16", commit });
-  tagMergedPr(pr, repository, git, create);
+  assert.deepEqual(tagMergedPr(pr, repository, git, create, passed), { kind: "release", tag: "v0.0.16", commit });
+  tagMergedPr(pr, repository, git, create, passed);
   assert.deepEqual(mutations, [{ tag: "v0.0.16", target: commit }]);
   existing = later;
-  assert.throws(() => tagMergedPr(pr, repository, git, create), /never move a tag/);
+  assert.throws(() => tagMergedPr(pr, repository, git, create, passed), /never move a tag/);
   existing = null;
   onMain = false;
-  assert.throws(() => tagMergedPr(pr, repository, git, create), /only point to commits/);
+  assert.throws(() => tagMergedPr(pr, repository, git, create, passed), /only point to commits/);
   assert.equal(mutations.length, 1);
+});
+
+test("a merge that jumped its checks is not tagged, packaged or published", () => {
+  const repository = "Okamishimo/csv-table-editor";
+  const commit = "a".repeat(40);
+  const head = "c".repeat(40);
+  const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
+    head: { sha: head }, title: "Release v0.0.16: release policy", merge_commit_sha: commit };
+  const git = (args) => {
+    if (args[0] === "show") return JSON.stringify(args[1].endsWith(":package.json") ? manifest : lock);
+    // The release tag does not exist yet, so a verified merge creates it.
+    if (args.includes("refs/tags/v0.0.16")) throw Object.assign(new Error("missing"), { status: 1 });
+    return commit;
+  };
+  const never = () => assert.fail("an unverified merge must not reach the tag API");
+  const green = { name: "Verify", status: "completed", conclusion: "success" };
+  const policy = { name: "PR policy", status: "completed", conclusion: "success" };
+
+  // Merged while Verify was still running: the merge button stays available
+  // during a run because this plan cannot require the checks server side.
+  assert.throws(() => tagMergedPr(pr, repository, git, never,
+    () => [policy, { name: "Verify", status: "in_progress", conclusion: null }]),
+  /Verify was still in_progress .*merged before its checks finished/);
+
+  for (const conclusion of ["failure", "cancelled", "timed_out", "skipped", "action_required"]) {
+    assert.throws(() => tagMergedPr(pr, repository, git, never,
+      () => [policy, { name: "Verify", status: "completed", conclusion }]),
+    new RegExp(`Verify concluded ${conclusion}`));
+  }
+
+  // A check that never ran at all, and one whose API could not be read, are
+  // both refusals: nothing is published on a guess.
+  assert.throws(() => tagMergedPr(pr, repository, git, never, () => [green]),
+    /PR policy never ran/);
+  assert.throws(() => tagMergedPr(pr, repository, git, never,
+    () => { throw new Error("Could not read the checks for " + head + "."); }), /Could not read the checks/);
+
+  // Without a head commit there is nothing whose checks could be read.
+  assert.throws(() => tagMergedPr({ ...pr, head: undefined }, repository, git, never, checksPassed),
+    /no head commit whose checks can be read/);
+
+  // Both green on the merged commit is what lets the tag be created.
+  const created = [];
+  assert.deepEqual(
+    tagMergedPr(pr, repository, git, (tag, target) => created.push({ tag, target }), () => [policy, green]),
+    { kind: "release", tag: "v0.0.16", commit });
+  assert.deepEqual(created, [{ tag: "v0.0.16", target: commit }]);
+});
+
+test("every kind of merge is held to its checks, not only a release", () => {
+  const repository = "Okamishimo/csv-table-editor";
+  const commit = "a".repeat(40);
+  const git = () => commit;
+  for (const title of ["Docs: explain the workflow", "Feature: add a thing", "Fix: correct a thing"]) {
+    const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
+      head: { sha: "c".repeat(40) }, title, merge_commit_sha: commit };
+    assert.throws(() => tagMergedPr(pr, repository, git,
+      () => assert.fail("nothing may be tagged"),
+      () => [{ name: "PR policy", status: "completed", conclusion: "success" },
+        { name: "Verify", status: "completed", conclusion: "failure" }]),
+    /Verify concluded failure/, title);
+  }
 });
 
 test("PR types require an exact prefix and a nonempty single-line description", () => {
@@ -184,8 +252,8 @@ test("a merged feature or fix PR makes no tag API call or version lookup", () =>
   };
   for (const [title, kind] of [["Feature: add a thing", "feature"], ["Fix: correct a thing", "fix"]]) {
     const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
-      title, merge_commit_sha: commit };
-    assert.deepEqual(tagMergedPr(pr, repository, git, () => assert.fail("only a release may create a tag")),
+      head: { sha: "c".repeat(40) }, title, merge_commit_sha: commit };
+    assert.deepEqual(tagMergedPr(pr, repository, git, () => assert.fail("only a release may create a tag"), checksPassed),
       { kind, tag: "", commit });
   }
 });
@@ -194,13 +262,13 @@ test("merged documentation PRs make no tag API call or version lookup, including
   const repository = "Okamishimo/csv-table-editor";
   const commit = "a".repeat(40);
   const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
-    title: "Docs: explain the workflow", merge_commit_sha: commit };
+    head: { sha: "c".repeat(40) }, title: "Docs: explain the workflow", merge_commit_sha: commit };
   const git = (args) => {
     assert.ok(["rev-parse", "merge-base"].includes(args[0]), "Docs merges must not read versions or tags");
     return commit;
   };
   for (let retry = 0; retry < 2; retry++) {
-    assert.deepEqual(tagMergedPr(pr, repository, git, () => assert.fail("Docs must never create a tag")),
+    assert.deepEqual(tagMergedPr(pr, repository, git, () => assert.fail("Docs must never create a tag"), checksPassed),
       { kind: "docs", tag: "", commit });
   }
 });

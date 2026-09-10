@@ -40,7 +40,11 @@ The release workflow checks out the tag, validates its package version, installs
 
 ## Server protection setup
 
-On 2026-09-06 GitHub rejected protection API access with HTTP 403 because this private repository's plan requires **GitHub Pro**. Local hooks and CI are present, but server protection is **not enabled**. Keep the repository private. Once the account supports private repository protections, run from the repository root:
+On 2026-09-10 GitHub still rejected both `branches/main/protection` and `rulesets` with HTTP 403 — "Upgrade to GitHub Pro or make this repository public to enable this feature" — as it did on 2026-09-06. Local hooks and CI are present, but server protection is **not enabled**, so nothing stops the merge button being pressed while `PR policy` and `Verify` are still running.
+
+What is enforced instead is the consequence: after a merge, `merge-release.yml` reads the merged PR's own head commit and refuses to create a tag, package or release unless the latest `PR policy` and `Verify` runs on it both completed successfully. A merge that jumped the checks fails that run and publishes nothing. It cannot undo the merge itself; only the protection below can prevent one.
+
+Keep the repository private. Once the account supports private repository protections, run from the repository root:
 
 ```sh
 gh api --method PUT repos/Okamishimo/csv-table-editor/branches/main/protection --input .github/main-protection.json

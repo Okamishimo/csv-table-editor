@@ -11,6 +11,49 @@ function git(args) {
 }
 
 /**
+ * The checks a merge must have passed, on the very commit that was merged.
+ *
+ * This repository's plan cannot require them server side, so the merge button
+ * stays available while `Verify` is still running and after it has failed.
+ * Merging is therefore not evidence that anything was verified, and a merge
+ * that jumped the checks must not become a tag, a package, or a release.
+ */
+const REQUIRED_CHECKS = ["PR policy", "Verify"];
+
+/** The latest run of each check on a commit. */
+function listCheckRuns(sha) {
+  let response;
+  try {
+    response = execFileSync("gh", ["api", "--method", "GET",
+      `repos/${REPOSITORY}/commits/${sha}/check-runs`, "-f", "filter=latest", "-f", "per_page=100"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch {
+    throw new Error(`Could not read the checks for ${sha}. Nothing is tagged or published on a guess.`);
+  }
+  return JSON.parse(response).check_runs || [];
+}
+
+/**
+ * Refuse a merge whose required checks had not passed on its own head commit.
+ * A check that is still running is not a pass, and neither is an API that
+ * cannot be reached.
+ */
+function assertChecksPassed(sha, runs = listCheckRuns) {
+  if (!/^[a-f0-9]{40}$/.test(sha || "")) throw new Error("The merged PR has no head commit whose checks can be read.");
+  const found = runs(sha);
+  for (const name of REQUIRED_CHECKS) {
+    const run = found.find((check) => check.name === name);
+    if (!run) throw new Error(`${name} never ran on merged commit ${sha}; this merge is not verified.`);
+    if (run.status !== "completed") {
+      throw new Error(`${name} was still ${run.status} on merged commit ${sha}; this PR was merged before its checks finished.`);
+    }
+    if (run.conclusion !== "success") {
+      throw new Error(`${name} concluded ${run.conclusion} on merged commit ${sha}; this merge is not verified.`);
+    }
+  }
+}
+
+/**
  * The four kinds of pull request, told apart by their title alone.
  *
  * `docs` carries documentation and is checked against the documentation
@@ -99,12 +142,15 @@ function ensureTagTarget(tag, commit, runGit = git) {
 function tagMergedPr(pr, repository, runGit = git, createRef = (tag, commit) => {
   execFileSync("gh", ["api", "--method", "POST", `repos/${REPOSITORY}/git/refs`,
     "-f", `ref=refs/tags/${tag}`, "-f", `sha=${commit}`], { stdio: ["ignore", "pipe", "pipe"] });
-}) {
+}, runs = listCheckRuns) {
   if (repository !== REPOSITORY || !pr?.merged || pr.base?.ref !== "main" ||
       pr.base.repo?.full_name !== REPOSITORY || !/^[a-f0-9]{40}$/.test(pr.merge_commit_sha || "")) {
     throw new Error("Only a merged PR into this repository's main can create a release tag.");
   }
   const commit = assertOnMain(pr.merge_commit_sha, runGit);
+  // Every kind is checked, not only a release: a merge that jumped the checks
+  // is worth saying out loud even when it publishes nothing.
+  assertChecksPassed(pr.head?.sha, runs);
   // Only a release publishes. Everything else merges and stops there, without
   // reading a version or reaching the tag API at all.
   const kind = prKind(pr.title);
@@ -146,4 +192,5 @@ if (require.main === module) {
   }
 }
 
-module.exports = { prKind, versionsAt, checkPr, validateTitle, assertOnMain, ensureTagTarget, tagMergedPr, main };
+module.exports = { prKind, versionsAt, checkPr, validateTitle, assertOnMain, ensureTagTarget,
+  REQUIRED_CHECKS, assertChecksPassed, tagMergedPr, main };

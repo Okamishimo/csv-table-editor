@@ -134,6 +134,15 @@ Topic branch -> staged verification -> commit -> push
 -> call the private release workflow -> package, verify, publish
 ```
 
+- Merging is not evidence that anything was verified. This plan cannot require
+  the checks before a merge, so the button stays available while `Verify` is
+  still running and after it has failed. `merge-release.yml` therefore reads the
+  merged PR's own head commit and refuses to go on unless the latest `PR policy`
+  and `Verify` runs on it both completed successfully. A merge that jumped them
+  creates no tag, no package and no release, and the run says so. Every kind is
+  held to this, not only a release; a check still running, one that never ran,
+  and a checks API that cannot be read are all refusals, because nothing is
+  published on a guess. Reading them needs the job's `checks: read` permission.
 - [merge-release.yml](workflows/merge-release.yml) handles merged PRs into main.
   Closing an unmerged PR does not create a tag. A merged Docs, Feature, or Fix PR
   reports that publication is skipped and never calls the tag API or release
@@ -156,10 +165,14 @@ Topic branch -> staged verification -> commit -> push
 
 ## Server protection and known limits
 
-On 2026-09-06, API inspection and an attempt to apply main protection returned
-HTTP 403, requiring GitHub Pro for this private repository. This is a dated
-observation, not permanent state; query again when reporting current status.
-Keep the repository private rather than making it public to enable protections.
+On 2026-09-10, `GET /repos/Okamishimo/csv-table-editor/branches/main/protection`
+and `GET /repos/Okamishimo/csv-table-editor/rulesets` both returned HTTP 403,
+"Upgrade to GitHub Pro or make this repository public to enable this feature",
+as an attempt to apply main protection did on 2026-09-06. Nothing server side
+blocks the merge button, including merging while the checks are still running.
+This is a dated observation, not permanent state; query again when reporting
+current status. Keep the repository private rather than making it public to
+enable protections.
 
 - [main-protection.json](main-protection.json) is a prepared configuration requiring
   PRs, GitHub Actions checks `PR policy` and `Verify`, an up-to-date branch, and

@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      # Reading the merged commit's own check runs: this plan cannot require
+      # them before a merge, so publication requires them after one.
+      checks: read
     outputs:
       kind: ${{ steps.tag.outputs.kind }}
       tag: ${{ steps.tag.outputs.tag }}
