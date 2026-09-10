@@ -1545,6 +1545,69 @@ test("a wheel gesture loads where it stops, not every window it passes", async (
     "one request, for the window the reader actually stopped at");
 });
 
+/** Count the measurements that re-pin the row height: those are the ones that
+ *  unset the pinned height, toggle a class over the whole window, and lay it
+ *  out twice. */
+function countRepinning(window, t) {
+  const rect = window.HTMLTableRowElement.prototype.getBoundingClientRect;
+  const counted = { pins: 0, reads: 0 };
+  window.HTMLTableRowElement.prototype.getBoundingClientRect = function count() {
+    counted.reads++;
+    if (this.parentElement && this.parentElement.classList.contains("csv-measuring")) counted.pins++;
+    return rect.call(this);
+  };
+  t.after(() => { window.HTMLTableRowElement.prototype.getBoundingClientRect = rect; });
+  return counted;
+}
+
+test("reading the file measures nothing for each report of how far it has got", (t) => {
+  const { window, send, page, index, spacer } = openMeasuredPreview(t);
+  page(1, "replace");
+  const counted = countRepinning(window, t);
+
+  // The host reports once per megabyte read, so a multi-gigabyte file reports
+  // thousands of times. Nothing about the rendered rows changes while it reads.
+  for (let report = 1; report <= 500; report++) {
+    send({ type: "fileIndex", totalRows: 0, complete: false,
+      indexedBytes: report * 1048576, size: 2000000000 });
+  }
+  assert.equal(counted.reads, 0, "a report of progress measures nothing at all");
+
+  index(500000);
+  assert.ok(counted.reads > 0, "the finished count is what measures the window");
+  assert.equal(spacer("space-below"), (500001 - 101) * ROW_HEIGHT,
+    "and it is what gives the rows outside the window their height");
+});
+
+test("a window of the same shape is not re-pinned for every page that replaces it", (t) => {
+  const { window, page, index } = openMeasuredPreview(t);
+  const counted = countRepinning(window, t);
+  page(1, "replace");
+  index(500000);
+  const afterFirst = counted.pins;
+  assert.ok(afterFirst > 0, "the first window is measured");
+
+  // A scan sweeping the file replaces the window again and again.
+  for (let pageNumber = 2; pageNumber <= 40; pageNumber++) page(pageNumber, "replace");
+  assert.equal(counted.pins, afterFirst,
+    "rows of the same height are not re-pinned, which lays the whole window out twice");
+});
+
+test("a row height that really changes is picked up and pinned again", (t) => {
+  const { window, page, index, spacer, setRenderedRowHeight } = openMeasuredPreview(t);
+  const counted = countRepinning(window, t);
+  page(1, "replace");
+  index(10000);
+  const afterFirst = counted.pins;
+
+  // A font or zoom change moves the height by whole pixels.
+  setRenderedRowHeight(ROW_HEIGHT + 6);
+  page(2, "replace");
+  assert.ok(counted.pins > afterFirst, "the window is measured again");
+  assert.equal(spacer("space-below"), (10001 - 201) * (ROW_HEIGHT + 6),
+    "and the placeholders carry the height the rows actually have");
+});
+
 test("the file is read before it can be browsed", async (t) => {
   const { document, window, wrap, send, page, offsetOfRow, postedMessages } =
     openMeasuredPreview(t);

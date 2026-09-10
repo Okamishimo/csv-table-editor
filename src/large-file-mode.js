@@ -1067,9 +1067,22 @@ function getLargeFileWebviewHtml() {
     return totalRows > 0 && rowHeight > 0;
   }
 
+  /**
+   * The collapsed height of a row, measured from the layout rather than
+   * assumed. Re-pinning it unsets a custom property and toggles a class on the
+   * whole window, then lays it out twice; on a wide file that is a tenth of a
+   * second for a window of a hundred rows, and it was being paid for every
+   * page a scan swept past and every report of how far the file had been read.
+   * So read the height first, which is one measurement of a layout the caller
+   * has already dirtied, and re-pin only when it disagrees. A font or zoom
+   * change moves it by whole pixels; a row carrying a line break can sit a
+   * fraction above the pinned height without meaning anything has changed.
+   */
   function measureRowHeight() {
     const rows = byId('rows').rows;
     if (!rows.length) return rowHeight;
+    const current = rows[0].getBoundingClientRect().height;
+    if (rowHeight > 0 && current > 0 && Math.abs(current - rowHeight) < 1.5) return rowHeight;
     byId('rows').style.removeProperty('--csv-preview-row-height');
     byId('rows').classList.add('csv-measuring');
     const height = rows[0].getBoundingClientRect().height;
@@ -1906,8 +1919,13 @@ function getLargeFileWebviewHtml() {
       indexComplete = Boolean(message.complete);
       if (message.complete) totalRows = message.totalRows || 0;
       showPreparing(message);
-      rowHeight = measureRowHeight();
-      updateSpacers();
+      // Reading the file reports progress once per megabyte, thousands of
+      // times over. Nothing about the rendered rows changes while it reads, so
+      // only the finished count is worth measuring and re-spacing for.
+      if (!preparing) {
+        rowHeight = measureRowHeight();
+        updateSpacers();
+      }
       reportLoadedWindow();
     } else if (message.type === 'searchStarted') {
       // A scan for an older query may still be reporting; ignore it from here.
