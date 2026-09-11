@@ -8,7 +8,7 @@ const { UpdateError } = require("./update-artifact");
 
 function cliInvocation(vscode, context, filePath, product, platform = process.platform, environment = process.env) {
   if (!["darwin", "win32"].includes(platform) || vscode.env.remoteName && context.extension.extensionKind !== vscode.ExtensionKind.UI) {
-    throw new UpdateError("Private CLI updates support local macOS and Windows extension installations only.");
+    throw new UpdateError("CLI updates support local macOS and Windows extension installations only.");
   }
   const paths = platform === "win32" ? path.win32 : path.posix;
   const appRoot = vscode.env.appRoot;
@@ -35,16 +35,37 @@ function cliInvocation(vscode, context, filePath, product, platform = process.pl
   return { executable, args, options: { env, shell: false, windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024 } };
 }
 
-async function installVsix(vscode, context, filePath, run = promisify(execFile)) {
+function installationError(error) {
+  const clean = (value) => String(value ?? "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/https?:\/\/[^\s<>"']+/gi, "[redacted URL]")
+    .replace(/\b(?:Bearer|Basic)\s+[^\s,;]+/gi, "[redacted authorization]")
+    .replace(/\b(?:gh[pousr]_[a-z0-9_]+|github_pat_[a-z0-9_]+)/gi, "[redacted token]")
+    .replace(/\b((?:access[_-]?token|token|password|authorization)\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]")
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+    .trim();
+  // execFile's message repeats the command and stderr. Prefer the actual CLI
+  // output; some VS Code versions report installation errors on stdout instead.
+  const detail = [clean(error?.stderr), clean(error?.stdout)].filter(Boolean).join("\n") || clean(error?.message);
+  const status = [
+    error?.code != null && `code ${clean(error.code)}`,
+    error?.signal && `signal ${clean(error.signal)}`,
+    error?.killed && "process terminated (timeout or cancellation)",
+  ].filter(Boolean).join(", ");
+  const message = `VS Code CLI installation failed${status ? ` (${status})` : ""}.${detail ? `\n${detail}` : ""}`;
+  return new UpdateError(message.length > 4000 ? `${message.slice(0, 4000)}\n[truncated]` : message);
+}
+
+async function installVsix(vscode, context, filePath, run = promisify(execFile), platform = process.platform) {
   try {
     const product = JSON.parse(await fs.readFile(path.join(vscode.env.appRoot, "product.json"), "utf8"));
-    const invocation = cliInvocation(vscode, context, filePath, product);
+    const invocation = cliInvocation(vscode, context, filePath, product, platform);
     await fs.access(invocation.executable);
     await fs.access(invocation.args[0]);
     await run(invocation.executable, invocation.args, invocation.options);
   } catch (error) {
     if (error instanceof UpdateError) throw error;
-    throw new UpdateError("VS Code CLI installation failed or timed out. Check disk space, VS Code compatibility, and extension installation permissions.");
+    throw installationError(error);
   }
 }
 

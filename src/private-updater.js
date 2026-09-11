@@ -7,6 +7,7 @@ const { createClient } = require("./github-release-client");
 const { installVsix } = require("./update-installer");
 const { UpdateError, isNewer, selectRelease, parseChecksum, verifyVsixManifest } = require("./update-artifact");
 
+// Legacy keys are used only by the credential cleanup command.
 const TOKEN_KEY = "privateUpdates.githubToken";
 const AUTH_KEY = "privateUpdates.authMethod";
 const HOUR = 3600000;
@@ -70,6 +71,7 @@ function createUpdater(context, vscode, dependencies = {}) {
   const now = dependencies.now || Date.now;
   const platform = dependencies.platform || process.platform;
   const output = vscode.window.createOutputChannel("CSV Table Editor Updates");
+  // Keep the existing directory so throttling, locks and installed state survive upgrades.
   const directory = path.join(context.globalStorageUri.fsPath, "private-updates");
   const manifest = context.extension.packageJSON;
   let disposed = false;
@@ -82,15 +84,6 @@ function createUpdater(context, vscode, dependencies = {}) {
   const supported = () => ["darwin", "win32"].includes(platform) &&
     !(vscode.env.remoteName && context.extension.extensionKind !== vscode.ExtensionKind.UI) &&
     context.extensionMode === vscode.ExtensionMode.Production;
-
-  async function token() {
-    const method = context.globalState.get(AUTH_KEY);
-    if (method === "github") {
-      return (await vscode.authentication.getSession("github", ["repo"], { silent: true }))?.accessToken;
-    }
-    if (method === "token") return context.secrets.get(TOKEN_KEY);
-    return undefined;
-  }
 
   async function checkLocked(manual) {
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -106,15 +99,13 @@ function createUpdater(context, vscode, dependencies = {}) {
       const delay = (Number.isFinite(hours) ? Math.max(1, Math.min(168, hours)) : 6) * HOUR;
       if (Number.isFinite(state.retryAt) && now() < state.retryAt) return { message: "GitHub requested a retry delay. Try again later." };
       if (!manual && Number.isFinite(state.lastAttempt) && now() - state.lastAttempt < delay) return {};
-      const accessToken = await token();
-      if (!accessToken) return { message: "Run CSV Table Editor: Configure Private Update Authentication to enable private updates." };
-      // Persist BEFORE the request so network/auth failures and restarts are throttled.
+      // Persist BEFORE the request so network failures and restarts are throttled.
       state.lastAttempt = now();
       state.retryAt = 0;
       await writeState(directory, state);
       try {
-        log("Checking the private GitHub release.");
-        const release = selectRelease(await client.latest(accessToken), manifest.version);
+        log("Checking the public GitHub release.");
+        const release = selectRelease(await client.latest(), manifest.version);
         if (!release) return { message: `CSV Table Editor ${manifest.version} is up to date (stable releases).` };
         if (disposed) return {};
         // Remove only our own interrupted download directories while holding the lock.
@@ -126,8 +117,8 @@ function createUpdater(context, vscode, dependencies = {}) {
         downloadDirectory = path.join(directory, `download-${randomUUID()}`);
         await fs.mkdir(downloadDirectory, { mode: 0o700 });
         const file = path.join(downloadDirectory, release.name);
-        const expectedHash = parseChecksum(await client.checksum(release.checksum, accessToken), release.name);
-        const actualHash = await client.download(release.vsix, accessToken, file);
+        const expectedHash = parseChecksum(await client.checksum(release.checksum), release.name);
+        const actualHash = await client.download(release.vsix, file);
         if (actualHash !== expectedHash) throw new UpdateError("The downloaded VSIX failed SHA-256 verification.");
         await verify(file, manifest, release.version);
         if (disposed || !manual && !configuration().get("enabled", true)) return {};
@@ -159,7 +150,7 @@ function createUpdater(context, vscode, dependencies = {}) {
     running = (async () => {
       try {
         if (!supported()) {
-          if (manual) await vscode.window.showInformationMessage("Private updates run in installed, local macOS/Windows extensions. Remote and Extension Development Hosts are skipped.");
+          if (manual) await vscode.window.showInformationMessage("Automatic updates run in installed, local macOS/Windows extensions. Remote and Extension Development Hosts are skipped.");
           return;
         }
         if (!manual && !configuration().get("enabled", true)) return;
@@ -173,7 +164,7 @@ function createUpdater(context, vscode, dependencies = {}) {
           if (!disposed && action === "Reload Window") await vscode.commands.executeCommand("workbench.action.reloadWindow");
         } else if (manual && result.message) await vscode.window.showInformationMessage(result.message);
       } catch (error) {
-        const message = error instanceof UpdateError ? error.message : "Private update failed. Check authentication, local storage access, and the VS Code installation.";
+        const message = error instanceof UpdateError ? error.message : "Update failed. Check your connection, local storage access, and the VS Code installation.";
         log(message);
         if (manual && !disposed) {
           try { await vscode.window.showWarningMessage(message); } catch { /* Host is closing. */ }
@@ -183,33 +174,17 @@ function createUpdater(context, vscode, dependencies = {}) {
     try { await running; } finally { running = undefined; }
   }
 
+  // Keep the old command ID so existing keybindings can remove legacy credentials.
   async function configureAuthentication() {
+    if (disposed) return;
     try {
-      const choice = await vscode.window.showQuickPick([
-        { label: "Fine-grained GitHub token", description: "Recommended: only this repository, Contents: Read-only", method: "token" },
-        { label: "Sign in with GitHub", description: "VS Code manages authentication; requires the broader repo OAuth scope", method: "github" },
-        { label: "Disconnect private updates", description: "Delete the saved token and stop using GitHub authentication for updates", method: "none" },
-      ], { title: "CSV Table Editor: Private Update Authentication" });
-      if (!choice || disposed) return;
-      if (choice.method === "token") {
-        const value = await vscode.window.showInputBox({ password: true, ignoreFocusOut: true,
-          title: "GitHub token for Okamishimo/csv-table-editor", prompt: "Select only this repository with Contents: Read-only. Stored in VS Code SecretStorage.",
-          validateInput: (input) => !input.trim() || /\s/.test(input.trim()) ? "Enter a non-empty token without whitespace." : undefined });
-        if (!value?.trim() || disposed) return;
-        await context.secrets.store(TOKEN_KEY, value.trim());
-        await context.globalState.update(AUTH_KEY, "token");
-      } else if (choice.method === "github") {
-        await vscode.authentication.getSession("github", ["repo"], { createIfNone: true });
-        await context.globalState.update(AUTH_KEY, "github");
-        await context.secrets.delete(TOKEN_KEY);
-      } else {
-        await context.globalState.update(AUTH_KEY, "none");
-        await context.secrets.delete(TOKEN_KEY);
-      }
-      await vscode.window.showInformationMessage(choice.method === "none" ? "Private update authentication disconnected." :
-        "Private update authentication saved. Run CSV Table Editor: Check for Extension Updates to check now.");
+      await context.secrets.delete(TOKEN_KEY);
+      await context.globalState.update(AUTH_KEY, undefined);
+      await vscode.window.showInformationMessage("Saved update authentication cleared. Public GitHub updates do not require a token or sign-in.");
     } catch {
-      log("Private update authentication could not be configured.");
+      const message = "Saved update authentication could not be cleared. Public updates do not use these credentials.";
+      log(message);
+      if (!disposed) await vscode.window.showWarningMessage(message);
     }
   }
 

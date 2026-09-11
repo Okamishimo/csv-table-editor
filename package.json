@@ -61,7 +61,7 @@
 					"type": "boolean",
 					"default": true,
 					"scope": "application",
-					"description": "Automatically install stable updates from the private Okamishimo/csv-table-editor GitHub Releases after authentication is configured."
+					"description": "Automatically install stable updates from public Okamishimo/csv-table-editor GitHub Releases. No token or sign-in is required."
 				},
 				"csvTableEditor.updates.checkIntervalHours": {
 					"type": "number",
@@ -69,7 +69,7 @@
 					"minimum": 1,
 					"maximum": 168,
 					"scope": "application",
-					"description": "Hours between automatic private update checks. Failed attempts also respect this interval."
+					"description": "Hours between automatic update checks. Failed attempts also respect this interval."
 				},
 				"csvTableEditor.updates.profileName": {
 					"type": "string",
@@ -102,7 +102,7 @@
 			},
 			{
 				"command": "csvTableEditor.configureUpdateAuthentication",
-				"title": "Configure Private Update Authentication",
+				"title": "Clear Saved Update Authentication",
 				"category": "CSV Table Editor"
 			}
 		]

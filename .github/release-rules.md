@@ -159,7 +159,8 @@ Topic branch -> staged verification -> commit -> push
 On 2026-09-06, API inspection and an attempt to apply main protection returned
 HTTP 403, requiring GitHub Pro for this private repository. This is a dated
 observation, not permanent state; query again when reporting current status.
-Keep the repository private rather than making it public to enable protections.
+The project is moving to public distribution. Changing visibility does not itself
+prove that protection is enabled; query its current state after the change.
 
 - [main-protection.json](main-protection.json) is a prepared configuration requiring
   PRs, GitHub Actions checks `PR policy` and `Verify`, an up-to-date branch, and

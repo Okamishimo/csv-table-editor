@@ -37,8 +37,8 @@ async function harness(t, overrides = {}) {
     { id: 1, name, size: payload.length, state: "uploaded" },
     { id: 2, name: `${name}.sha256`, size: Buffer.byteLength(checksum), state: "uploaded" },
   ] };
-  const values = new Map([[AUTH_KEY, "token"]]);
-  const secrets = new Map([[TOKEN_KEY, "test-only-secret"]]);
+  const values = new Map();
+  const secrets = new Map();
   const messages = [];
   const logs = [];
   const installs = [];
@@ -66,9 +66,9 @@ async function harness(t, overrides = {}) {
     },
   };
   const client = {
-    latest: async (token) => { assert.ok(token); calls.latest++; return release; },
-    checksum: async () => { calls.checksum++; return checksum; },
-    download: async (asset, token, file) => { calls.download++; await fs.writeFile(file, payload); return hash; },
+    latest: async (...args) => { assert.deepEqual(args, []); calls.latest++; return release; },
+    checksum: async (...args) => { assert.deepEqual(args, [release.assets[1]]); calls.checksum++; return checksum; },
+    download: async (asset, file) => { calls.download++; await fs.writeFile(file, payload); return hash; },
   };
   const dependencies = { client, now: () => clock, platform: "darwin", install: async (file) => {
     assert.deepEqual(await fs.readFile(file), payload);
@@ -164,25 +164,44 @@ test("rate-limit retry delay survives restarts and manual requests", async (t) =
   assert.equal(h.calls.latest, 2);
 });
 
-test("authentication is explicit, token is only stored in SecretStorage, OAuth background access is silent", async (t) => {
+test("public updates install without authentication, including legacy token, OAuth and disconnected profiles", async (t) => {
+  for (const method of [undefined, "token", "github", "none"]) {
+    const h = await harness(t);
+    h.values.set(AUTH_KEY, method);
+    h.secrets.set(TOKEN_KEY, "expired-legacy-secret");
+    h.context.secrets.get = async () => { throw new Error("must not read old credentials"); };
+    h.vscode.authentication.getSession = async () => { throw new Error("must not request a session"); };
+    h.vscode.window.showQuickPick = h.vscode.window.showInputBox = async () => { throw new Error("must not prompt for authentication"); };
+    await h.updater.check(true);
+    assert.equal(h.calls.latest, 1);
+    assert.equal(h.calls.checksum, 1);
+    assert.equal(h.installs.length, 1);
+    assert.doesNotMatch(JSON.stringify([...h.messages, ...h.logs]), /expired-legacy-secret/);
+  }
+});
+
+test("legacy authentication command removes credentials without disabling public updates or signing out GitHub", async (t) => {
   const h = await harness(t);
-  h.values.clear(); h.secrets.clear();
-  await h.updater.check();
-  assert.equal(h.calls.latest, 0);
-  assert.equal(h.authCalls.length, 0);
+  h.values.set(AUTH_KEY, "token");
+  h.secrets.set(TOKEN_KEY, "expired-legacy-secret");
   await h.updater.configureAuthentication();
-  assert.equal(h.secrets.get(TOKEN_KEY), "replacement-secret");
-  assert.equal(h.values.get(AUTH_KEY), "token");
-  assert.doesNotMatch(JSON.stringify([...h.values]), /replacement-secret/);
-  h.vscode.window.showQuickPick = async () => ({ method: "github" });
-  await h.updater.configureAuthentication();
-  assert.deepEqual(h.authCalls[0], ["github", ["repo"], { createIfNone: true }]);
   assert.equal(h.secrets.has(TOKEN_KEY), false);
+  assert.equal(h.values.get(AUTH_KEY), undefined);
+  assert.equal(h.authCalls.length, 0);
+  assert.equal(h.config.enabled, true);
+  assert.match(h.messages[0].message, /cleared.*do not require/);
   await h.updater.check();
-  assert.deepEqual(h.authCalls[1], ["github", ["repo"], { silent: true }]);
-  h.vscode.window.showQuickPick = async () => ({ method: "none" });
+  assert.equal(h.installs.length, 1);
+});
+
+test("legacy credential cleanup failure is sanitized and does not block public updates", async (t) => {
+  const h = await harness(t);
+  h.context.secrets.delete = async () => { throw new Error("secret-storage-details"); };
   await h.updater.configureAuthentication();
-  assert.equal(h.values.get(AUTH_KEY), "none");
+  assert.equal(h.messages[0].warning, true);
+  assert.doesNotMatch(JSON.stringify([...h.messages, ...h.logs]), /secret-storage-details/);
+  await h.updater.check();
+  assert.equal(h.installs.length, 1);
 });
 
 test("checksum mismatch, installer failure and disposal never mark an update installed", async (t) => {
@@ -194,7 +213,7 @@ test("checksum mismatch, installer failure and disposal never mark an update ins
     t.after(() => updater.dispose());
     if (failure === "dispose") {
       const latest = h.client.latest;
-      h.client.latest = async () => { updater.dispose(); return latest("token"); };
+      h.client.latest = async () => { updater.dispose(); return latest(); };
     }
     await updater.check(true);
     assert.equal((await readState(h.stateDirectory)).installedVersion, undefined);
@@ -261,8 +280,62 @@ test("macOS/Windows CLI uses this app, separated arguments and correct user/exte
   }
 });
 
-test("installer errors do not expose child process output", async () => {
-  await assert.rejects(installVsix({ env: { appRoot: "/missing-app" } }, {}, "unused"), /CLI installation failed/);
+async function failingInstaller(h, error) {
+  const appRoot = path.join(h.directory, "Code.app", "Contents", "Resources", "app");
+  await fs.mkdir(path.join(appRoot, "out"), { recursive: true });
+  await fs.writeFile(path.join(appRoot, "product.json"), JSON.stringify({ nameShort: "Code" }));
+  const vscode = { ...h.vscode, env: { appRoot } };
+  const context = { ...h.context, globalStorageUri: { fsPath: path.join(h.directory, "User", "globalStorage", "editor") } };
+  const invocation = cliInvocation(vscode, context, "unused", { nameShort: "Code" }, "darwin");
+  await fs.mkdir(path.dirname(invocation.executable), { recursive: true });
+  await fs.writeFile(invocation.executable, "");
+  await fs.writeFile(invocation.args[0], "");
+  return (file) => installVsix(vscode, context, file, async () => { throw error; }, "darwin");
+}
+
+test("installer reports CLI diagnostics, exit status and launch errors without exposing credentials", async (t) => {
+  const cases = [
+    { error: Object.assign(new Error("Command failed: internal invocation"), {
+      code: 1, stderr: "Warning: installation failed", stdout: "Extension requires VS Code 1.100 or newer.",
+    }), expected: /code 1.*\nWarning: installation failed\nExtension requires VS Code 1.100 or newer/, absent: /internal invocation/ },
+    { error: Object.assign(new Error("spawn Code EACCES"), { code: "EACCES" }), expected: /EACCES.*\nspawn Code EACCES/ },
+    { error: Object.assign(new Error("Command failed"), { code: null, killed: true, signal: "SIGTERM", stderr: "Installation interrupted" }),
+      expected: /SIGTERM.*timeout or cancellation.*\nInstallation interrupted/, absent: /code null|code ,/ },
+    { error: Object.assign(new Error("Command failed"), { stderr: "\u001b[31mPermission denied\u001b[0m\nAuthorization: Bearer secret-value\nhttps://example.com/file?signature=private-value\ntoken=other-secret github_pat_abcdef ghp_abcdef" }),
+      expected: /Permission denied/, absent: /secret-value|private-value|other-secret|github_pat_abcdef|ghp_abcdef|\u001b/ },
+    { error: Object.assign(new Error("Command failed"), { stdout: "Disk full. " + "x".repeat(5000) }), expected: /Disk full.*\n\[truncated\]/ },
+  ];
+  for (const entry of cases) {
+    const h = await harness(t);
+    const install = await failingInstaller(h, entry.error);
+    await assert.rejects(install("unused.vsix"), (error) => {
+      assert.ok(error instanceof UpdateError);
+      assert.match(error.message, entry.expected);
+      if (entry.absent) assert.doesNotMatch(error.message, entry.absent);
+      assert.ok(error.message.length <= 4012);
+      return true;
+    });
+  }
+  await assert.rejects(installVsix({ env: { appRoot: "/missing-app" } }, {}, "unused"), /CLI installation failed.*ENOENT.*\n.*product.json/);
+});
+
+test("actual installer diagnostics reach manual warnings and background logs without marking installation complete", async (t) => {
+  for (const manual of [true, false]) {
+    const h = await harness(t);
+    const install = await failingInstaller(h, Object.assign(new Error("Command failed"), {
+      code: 1, stderr: "Cannot install extension: incompatible VS Code version.",
+    }));
+    const updater = createUpdater(h.context, h.vscode, { ...h.dependencies, install });
+    t.after(() => updater.dispose());
+    await updater.check(manual);
+    assert.match(h.logs.join("\n"), /code 1.*\nCannot install extension: incompatible VS Code version/);
+    if (manual) {
+      assert.equal(h.messages[0].warning, true);
+      assert.match(h.messages[0].message, /Cannot install extension: incompatible VS Code version/);
+    } else assert.equal(h.messages.length, 0);
+    assert.equal((await readState(h.stateDirectory)).installedVersion, undefined);
+    assert.deepEqual(await fs.readdir(h.stateDirectory), ["state.json"]);
+  }
 });
 
 test("release script enforces exact stable tags and never replaces existing assets", () => {

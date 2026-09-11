@@ -10,7 +10,7 @@ const { UpdateError, MAX_VSIX_BYTES } = require("./update-artifact");
 const REPOSITORY = "Okamishimo/csv-table-editor";
 const API_ROOT = `https://api.github.com/repos/${REPOSITORY}`;
 
-function requestHeaders(url, token, accept) {
+function requestHeaders(url, accept) {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port && parsed.port !== "443") {
     throw new UpdateError("GitHub returned an unsafe download URL.");
@@ -19,9 +19,8 @@ function requestHeaders(url, token, accept) {
   if (!isApi && !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(parsed.hostname)) {
     throw new UpdateError("GitHub returned an unexpected download host.");
   }
-  const headers = { "User-Agent": "csv-table-editor-private-updater", Accept: accept };
+  const headers = { "User-Agent": "csv-table-editor-updater", Accept: accept };
   if (isApi) {
-    headers.Authorization = `Bearer ${token}`;
     headers["X-GitHub-Api-Version"] = "2022-11-28";
   }
   return headers;
@@ -35,12 +34,12 @@ function httpError(status, headers, now = Date.now()) {
       Number.isFinite(retry) ? now + retry * 1000 : 0, Number.isFinite(reset) ? reset : 0));
     return new UpdateError("GitHub API rate limit reached. The updater will retry later.", retryAt);
   }
-  if ([401, 403, 404].includes(status)) return new UpdateError(`GitHub HTTP ${status}: check repository access, token expiry/SSO approval, and whether a stable release exists.`);
+  if ([401, 403, 404].includes(status)) return new UpdateError(`GitHub HTTP ${status}: check that the repository and stable release are public and the release assets are available.`);
   return new UpdateError(`GitHub request failed (HTTP ${status}).`);
 }
 
 function createClient({ request = https.request, timeoutMs = 120000 } = {}) {
-  async function transfer(url, token, { limit, accept, filePath, expectedSize }) {
+  async function transfer(url, { limit, accept, filePath, expectedSize }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     timeout.unref?.();
@@ -50,13 +49,13 @@ function createClient({ request = https.request, timeoutMs = 120000 } = {}) {
     try {
       let response;
       for (let redirects = 0; redirects <= 3; redirects++) {
-        const headers = requestHeaders(url, token, accept);
+        const headers = requestHeaders(url, accept);
         response = await new Promise((resolve, reject) => {
           const req = request(url, { headers, signal: controller.signal }, resolve);
           req.on("error", reject);
           req.end();
         });
-        // Discard bodies without buffering; even a redirect must not leak a token.
+        // Discard redirect bodies without buffering; every target is validated.
         response.on("error", () => {});
         if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
           const location = response.headers.location;
@@ -97,16 +96,16 @@ function createClient({ request = https.request, timeoutMs = 120000 } = {}) {
     }
   }
   return {
-    async latest(token) {
-      const result = await transfer(`${API_ROOT}/releases/latest`, token, { limit: 1024 * 1024, accept: "application/vnd.github+json" });
+    async latest() {
+      const result = await transfer(`${API_ROOT}/releases/latest`, { limit: 1024 * 1024, accept: "application/vnd.github+json" });
       try { return JSON.parse(result.text); } catch { throw new UpdateError("GitHub returned invalid release metadata."); }
     },
-    async checksum(asset, token) {
-      return (await transfer(`${API_ROOT}/releases/assets/${asset.id}`, token,
+    async checksum(asset) {
+      return (await transfer(`${API_ROOT}/releases/assets/${asset.id}`,
         { limit: 256, expectedSize: asset.size, accept: "application/octet-stream" })).text;
     },
-    async download(asset, token, filePath) {
-      return (await transfer(`${API_ROOT}/releases/assets/${asset.id}`, token,
+    async download(asset, filePath) {
+      return (await transfer(`${API_ROOT}/releases/assets/${asset.id}`,
         { limit: MAX_VSIX_BYTES, expectedSize: asset.size, accept: "application/octet-stream", filePath })).sha256;
     },
   };
