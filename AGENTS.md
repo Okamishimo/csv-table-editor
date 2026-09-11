@@ -399,8 +399,11 @@ cache instead of reusing data decoded with the previous encoding.
 
 - Updates come only from `Okamishimo/csv-table-editor`, a public GitHub
   repository. Do not publish this extension to the public VS Code Marketplace.
-  Preserve the extension ID `Edgar-Dang.csv-table-editor` so existing
-  installations are upgraded in place.
+  Use the independent extension ID `Okamishimo.csv-table-editor`; reusing
+  `Edgar-Dang.csv-table-editor` links this adaptation to the original Marketplace
+  extension. Keep publisher/name validation strict. Old-ID installations need
+  one manual VSIX installation and must be disabled before using the new ID.
+  Do not automatically uninstall them or overwrite their save history.
 - `onStartupFinished` activates the extension. The distribution hook registers
   the CSV editor before starting the updater, and isolates updater initialization
   failures. Keep updates independent of normal CSV editing.
@@ -443,6 +446,7 @@ cache instead of reusing data decoded with the previous encoding.
 - Version 0.0.10 is the first updater-enabled build. Versions through 0.0.9 need
   one manual VSIX upgrade. Older private-updater builds with missing or expired
   credentials also need a manual upgrade to a release containing public updates.
+  All builds using the old publisher need the identity migration in docs/updates.md.
 
 ## Testing Workflow
 

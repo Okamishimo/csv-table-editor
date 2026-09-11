@@ -28,7 +28,8 @@ async function zipManifest(manifest, name = "extension/package.json") {
 async function harness(t, overrides = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "csv-updater-test-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const manifest = { name: "csv-table-editor", publisher: "Edgar-Dang", version: "0.0.10" };
+  const { name: extensionName, publisher } = require("../package.json");
+  const manifest = { name: extensionName, publisher, version: "0.0.10" };
   const payload = await zipManifest({ ...manifest, version: "0.0.11" });
   const hash = createHash("sha256").update(payload).digest("hex");
   const name = "csv-table-editor-0.0.11-enhanced.vsix";
@@ -115,6 +116,26 @@ test("real ZIP validation checks identity, exact version, manifest bounds and co
   await assert.rejects(verifyVsixManifest(file, h.context.extension.packageJSON, "0.0.11"), /manifest/);
   await fs.writeFile(file, h.payload.subarray(0, -8));
   await assert.rejects(verifyVsixManifest(file, h.context.extension.packageJSON, "0.0.11"), /manifest/);
+});
+
+test("the independent extension rejects original-publisher updates even with a matching checksum", async (t) => {
+  const h = await harness(t);
+  const manifest = h.context.extension.packageJSON;
+  assert.equal(`${manifest.publisher}.${manifest.name}`, "Okamishimo.csv-table-editor");
+  assert.equal(Object.hasOwn(require("../package.json"), "__metadata"), false, "do not package metadata copied from an installed extension");
+  const payload = await zipManifest({ ...manifest, publisher: "Edgar-Dang", version: "0.0.11" });
+  const hash = createHash("sha256").update(payload).digest("hex");
+  const checksum = `${hash}  ${h.release.assets[0].name}\n`;
+  h.release.assets[0].size = payload.length;
+  h.release.assets[1].size = Buffer.byteLength(checksum);
+  h.client.checksum = async () => checksum;
+  h.client.download = async (asset, file) => { await fs.writeFile(file, payload); return hash; };
+  await h.updater.check(true);
+  assert.equal(h.installs.length, 0);
+  assert.equal((await readState(h.stateDirectory)).installedVersion, undefined);
+  assert.deepEqual(await fs.readdir(h.stateDirectory), ["state.json"]);
+  assert.equal(h.messages[0].warning, true);
+  assert.match(h.messages[0].message, /extension identity/);
 });
 
 test("successful update downloads, validates, installs once, cleans up and offers Reload", async (t) => {
@@ -262,8 +283,8 @@ test("macOS/Windows CLI uses this app, separated arguments and correct user/exte
     const paths = platform === "darwin" ? path.posix : path.win32;
     const user = platform === "darwin" ? "/Users/name/Library/Application Support/Code" : "C:\\Users\\name\\AppData\\Roaming\\Code";
     const extensions = platform === "darwin" ? "/Users/name/.vscode/extensions" : "C:\\Users\\name\\.vscode\\extensions";
-    const context = { extension: { extensionKind: 2 }, globalStorageUri: { fsPath: paths.join(user, "User/globalStorage/edgar-dang.csv-table-editor") },
-      extensionUri: { fsPath: paths.join(extensions, "edgar-dang.csv-table-editor-0.0.10") } };
+    const context = { extension: { extensionKind: 2 }, globalStorageUri: { fsPath: paths.join(user, "User/globalStorage/okamishimo.csv-table-editor") },
+      extensionUri: { fsPath: paths.join(extensions, "okamishimo.csv-table-editor-0.0.10") } };
     const vscode = { env: { appRoot: root }, workspace: { getConfiguration: () => ({ get: () => "" }) }, ExtensionKind: { UI: 1 } };
     const file = paths.join(user, "spaces & symbols", "update.vsix");
     const result = cliInvocation(vscode, context, file, { nameShort: "Code" }, platform, { NODE_OPTIONS: "unsafe", VSCODE_IPC_HOOK_CLI: "remote" });
@@ -273,7 +294,7 @@ test("macOS/Windows CLI uses this app, separated arguments and correct user/exte
     assert.equal(result.options.env.ELECTRON_RUN_AS_NODE, "1");
     assert.equal(result.options.env.NODE_OPTIONS, undefined);
     assert.equal(result.options.env.VSCODE_IPC_HOOK_CLI, undefined);
-    context.globalStorageUri.fsPath = paths.join(user, "User/profiles/abc/globalStorage/edgar-dang.csv-table-editor");
+    context.globalStorageUri.fsPath = paths.join(user, "User/profiles/abc/globalStorage/okamishimo.csv-table-editor");
     assert.throws(() => cliInvocation(vscode, context, file, { nameShort: "Code" }, platform), /profileName/);
     vscode.workspace.getConfiguration = () => ({ get: () => "Personal Profile" });
     assert.deepEqual(cliInvocation(vscode, context, file, { nameShort: "Code" }, platform).args.slice(-2), ["--profile", "Personal Profile"]);

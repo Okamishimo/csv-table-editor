@@ -2,8 +2,8 @@
 	"name": "csv-table-editor",
 	"displayName": "CSV Table Editor — Encoding & History",
 	"description": "Open, view and edit CSV/TSV files as a spreadsheet grid: sort, filter, search, pick the encoding (UTF-8, UTF-16, Shift_JIS, Windows-1252/1258...), keep a save history and compare versions as a side-by-side table diff.",
-	"version": "0.0.22",
-	"publisher": "Edgar-Dang",
+	"version": "0.0.23",
+	"publisher": "Okamishimo",
 	"license": "MIT",
 	"icon": "media/icon.png",
 	"repository": {
@@ -135,10 +135,5 @@
 		"webpack-cli": "^5.1.4",
 		"yauzl": "^3.4.0",
 		"yazl": "^2.5.1"
-	},
-	"__metadata": {
-		"installedTimestamp": 1788502981135,
-		"targetPlatform": "undefined",
-		"size": 914016
 	}
 }

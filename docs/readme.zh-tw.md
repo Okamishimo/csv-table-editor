@@ -4,7 +4,7 @@
 
 英文版：[readme.md](../readme.md)。
 
-> **這是個人改編版。** 本專案以 Edgar Dang 的 [CSV Table Editor](https://github.com/minlong8111/csv-table-editor) 為基礎，原版以 `Edgar-Dang.csv-table-editor` 發佈於 Marketplace，採 MIT 授權。原版擴充功能的執行檔原封不動沿用，此處新增的行為——大檔串流預覽、編碼偵測、儲存格層級的歷史比對、格線虛擬化、欄位範圍搜尋與自動更新器——則由本專案自己的模組接上去。本版本透過公開 GitHub Releases 以 VSIX 散布，不是上游的擴充功能，相關問題請不要回報到上游。
+> **這是個人改編版。** 本專案以 Edgar Dang 的 [CSV Table Editor](https://github.com/minlong8111/csv-table-editor) 為基礎，原版以 `Edgar-Dang.csv-table-editor` 發佈於 Marketplace，採 MIT 授權。原版擴充功能的執行檔原封不動沿用，此處新增的行為——大檔串流預覽、編碼偵測、儲存格層級的歷史比對、格線虛擬化、欄位範圍搜尋與自動更新器——則由本專案自己的模組接上去。本版本使用獨立的擴充套件 ID `Okamishimo.csv-table-editor`，透過公開 GitHub Releases 以 VSIX 散布。VS Code 不再將它連結到原版 Marketplace 頁面，相關問題請回報到本專案。
 
 ![CSV Table Editor 總覽](https://raw.githubusercontent.com/minlong8111/assets/main/csv-table-editor/screenshot-overview.png)
 
@@ -63,7 +63,7 @@
 
 可編輯格線是記憶體內的編輯器。超過 64 MiB 的本機檔案會改以串流唯讀預覽開啟；預覽會先把整個檔案讀過一遍，之後就能捲動與搜尋整個檔案。預覽能做到什麼、不能做到什麼，請見[大型檔案](large-files.md)。
 
-自動更新使用公開 GitHub Releases，不需要 Token 或登入，請見[自動更新](updates.md)。
+自動更新使用公開 GitHub Releases，不需要 Token 或登入。若從 ID 為 `Edgar-Dang.csv-table-editor` 的版本升級，請先手動安裝一次新版 VSIX，並停用舊擴充套件後再重新載入。安裝方式與儲存歷史的搬移說明請見[自動更新與遷移](updates.md)。
 
 ## 授權
 
