@@ -36,7 +36,7 @@ loads the shared skill directly. Keep the procedure in that one shared file.
 This repository contains a customized VS Code CSV/TSV table editor. It supports
 editable in-memory grids, encoding detection and conversion, save history,
 column-scoped search, configurable fonts, a streaming read-only preview for
-large files, and private GitHub Release updates on macOS and Windows.
+large files, and public GitHub Release updates on macOS and Windows.
 
 The project is not laid out like a normal source-first VS Code extension. The
 original extension runtime is the minified, checked-in `dist/extension.js`.
@@ -56,7 +56,7 @@ into the original runtime by `scripts/patch-distribution.js`.
 - `scripts/private-release.js`: Release version validation, draft/published
   release lookup, package verification, checksum generation, and publication.
 - `.github/workflows/private-release.yml`: Builds and packages tagged versions,
-  then uploads the VSIX and checksum to the private GitHub Release.
+  then uploads the VSIX and checksum to the GitHub Release.
 - `src/encoding-detector.js`: BOM, BOM-less UTF-16, strict UTF-8, and scored
   legacy-encoding detection.
 - `src/large-file-guard.js`: Editable-grid size limits and oversized-file
@@ -78,9 +78,9 @@ into the original runtime by `scripts/patch-distribution.js`.
   last in the decorator chain.
 - `src/save-progress.js`: Grid requests that never answer a save with nothing,
   and status-bar reporting for a save slow enough to notice.
-- `src/private-updater.js`: Commands, authentication, persistent check timing,
+- `src/private-updater.js`: Commands, legacy credential cleanup, persistent check timing,
   cross-window locking, installation coordination, and reload prompts.
-- `src/github-release-client.js`: Authenticated GitHub API access and bounded
+- `src/github-release-client.js`: Unauthenticated public GitHub API access and bounded
   streaming downloads with restricted redirects and sanitized errors.
 - `src/update-artifact.js`: Stable version comparison, release asset selection,
   checksum parsing, and bounded VSIX manifest validation.
@@ -395,9 +395,9 @@ Do not weaken strict UTF-8 validation or collapse BOM and non-BOM UTF-16 menu
 entries. Encoding changes in large-file mode must reset the stream and page
 cache instead of reusing data decoded with the previous encoding.
 
-## Private Automatic Updates
+## Automatic Updates
 
-- Updates come only from `Okamishimo/csv-table-editor`, a private GitHub
+- Updates come only from `Okamishimo/csv-table-editor`, a public GitHub
   repository. Do not publish this extension to the public VS Code Marketplace.
   Preserve the extension ID `Edgar-Dang.csv-table-editor` so existing
   installations are upgraded in place.
@@ -405,14 +405,13 @@ cache instead of reusing data decoded with the previous encoding.
   the CSV editor before starting the updater, and isolates updater initialization
   failures. Keep updates independent of normal CSV editing.
 - Preserve commands `csvTableEditor.checkForUpdates` and
-  `csvTableEditor.configureUpdateAuthentication`. Background checks must not
-  prompt for login; authentication is configured explicitly through the command.
-- Fine-grained tokens belong only in `ExtensionContext.secrets` (SecretStorage),
-  scoped to this repository with Contents read access. The alternative is the
-  built-in GitHub authentication provider with `repo` scope: let VS Code manage
-  its session and use `{ silent: true }` for background session retrieval.
-  Never put tokens in source, settings, Git, state files, logs, or installer
-  arguments. Client credentials are separate from Actions' `GITHUB_TOKEN`.
+  `csvTableEditor.configureUpdateAuthentication`. The latter clears legacy
+  credentials; it must not request tokens or GitHub sessions. Automatic and manual
+  checks use public releases without reading saved credentials or sending an
+  Authorization header. Keep legacy storage names for update state and locks so
+  the transition preserves throttling and installed-version markers.
+- Never put legacy tokens in source, settings, Git, state files, logs, or
+  installer arguments. Publishing still uses Actions' `GITHUB_TOKEN`.
 - Automatic checks default to six hours, configurable from 1 to 168 hours with
   `csvTableEditor.updates.checkIntervalHours`. This is a product default, not an
   API requirement. The initial timer waits 30 seconds; the five-minute timer
@@ -427,9 +426,9 @@ cache instead of reusing data decoded with the previous encoding.
   Verify SHA-256, publisher, extension name, and exact package version before
   installation. Keep ZIP manifest reads bounded; do not extract the whole archive.
 - Stream VSIX downloads with the 128 MiB cap and two-minute request deadline.
-  Keep metadata/checksum limits and redirect limits. Send authorization only to
-  the configured repository's HTTPS GitHub API paths, never to redirected asset
-  hosts. Reject unexpected hosts and preserve sanitized errors.
+  Keep metadata/checksum limits and redirect limits. Allow only the configured
+  repository's HTTPS GitHub API paths and approved asset hosts. Reject unexpected
+  hosts and preserve sanitized errors.
 - Use the running app's CLI via `execFile` with separate arguments and
   `shell: false`; do not depend on PATH or build a Windows shell command string.
   Preserve the current user-data and extension directories. Named profiles require
@@ -442,7 +441,8 @@ cache instead of reusing data decoded with the previous encoding.
   an installed-version marker. Tests must stub authentication, network, and CLI
   installation instead of modifying the user's installed extension.
 - Version 0.0.10 is the first updater-enabled build. Versions through 0.0.9 need
-  one manual VSIX upgrade, followed by authentication setup on each computer.
+  one manual VSIX upgrade. Older private-updater builds with missing or expired
+  credentials also need a manual upgrade to a release containing public updates.
 
 ## Testing Workflow
 
@@ -498,7 +498,7 @@ actually changed.
 Update `readme.md` when user-visible behavior, settings, limits, or usage
 changes. The subjects too long for it have a page each under `docs/`:
 `docs/large-files.md` for the streaming preview, `docs/updates.md` for the
-private updater, and `docs/releasing.md` for the release workflow and
+automatic updater, and `docs/releasing.md` for the release workflow and
 repository protection. Change the page that owns the subject instead of
 restating it in the readme, which links to them.
 

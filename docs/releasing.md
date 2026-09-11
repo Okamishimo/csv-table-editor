@@ -6,7 +6,7 @@ The complete contributor and agent policy is in [Release rules](../.github/relea
 
 For release preparation, use the project's `release-preflight` skill in Codex, or `/release-preflight` in Claude Code. You can also ask either agent to perform a release preflight in plain language. Both use the same [preflight procedure](../.claude/skills/release-preflight/SKILL.md), covering versions, changes, tests, PR checks, tags and workflow readiness. A preflight request alone does not commit, push, merge or publish. Reopen the project session if the newly added skill does not appear.
 
-The workflow is [`.github/workflows/private-release.yml`](../.github/workflows/private-release.yml). Enable GitHub Actions for the repository and allow the workflow's job-level `contents: write` permission. No custom repository Secrets, PAT, or Marketplace publisher token are needed: the upload uses GitHub's short-lived `GITHUB_TOKEN`. Client read tokens belong only in each computer's VS Code SecretStorage.
+The workflow is [`.github/workflows/private-release.yml`](../.github/workflows/private-release.yml). Enable GitHub Actions for the repository and allow the workflow's job-level `contents: write` permission. No custom repository Secrets, PAT, or Marketplace publisher token are needed: the upload uses GitHub's short-lived `GITHUB_TOKEN`. The public updater requires no client credentials. The existing workflow filename is retained for compatibility.
 
 ## Pull requests
 
@@ -40,7 +40,7 @@ The release workflow checks out the tag, validates its package version, installs
 
 ## Server protection setup
 
-On 2026-09-06 GitHub rejected protection API access with HTTP 403 because this private repository's plan requires **GitHub Pro**. Local hooks and CI are present, but server protection is **not enabled**. Keep the repository private. Once the account supports private repository protections, run from the repository root:
+On 2026-09-06, while the repository was private, GitHub rejected protection API access with HTTP 403 because the plan required **GitHub Pro**. This is historical state, not a check of current protection. After changing repository visibility, query protection and existing rulesets again. To apply the prepared configuration when supported, run from the repository root:
 
 ```sh
 gh api --method PUT repos/Okamishimo/csv-table-editor/branches/main/protection --input .github/main-protection.json

@@ -4,7 +4,7 @@
 
 英文版：[readme.md](../readme.md)。
 
-> **這是個人改編版。** 本專案以 Edgar Dang 的 [CSV Table Editor](https://github.com/minlong8111/csv-table-editor) 為基礎，原版以 `Edgar-Dang.csv-table-editor` 發佈於 Marketplace，採 MIT 授權。原版擴充功能的執行檔原封不動沿用，此處新增的行為——大檔串流預覽、編碼偵測、儲存格層級的歷史比對、格線虛擬化、欄位範圍搜尋與私有更新器——則由本專案自己的模組接上去。本版本僅以私有 VSIX 散布，不是上游的擴充功能，相關問題請不要回報到上游。
+> **這是個人改編版。** 本專案以 Edgar Dang 的 [CSV Table Editor](https://github.com/minlong8111/csv-table-editor) 為基礎，原版以 `Edgar-Dang.csv-table-editor` 發佈於 Marketplace，採 MIT 授權。原版擴充功能的執行檔原封不動沿用，此處新增的行為——大檔串流預覽、編碼偵測、儲存格層級的歷史比對、格線虛擬化、欄位範圍搜尋與自動更新器——則由本專案自己的模組接上去。本版本透過公開 GitHub Releases 以 VSIX 散布，不是上游的擴充功能，相關問題請不要回報到上游。
 
 ![CSV Table Editor 總覽](https://raw.githubusercontent.com/minlong8111/assets/main/csv-table-editor/screenshot-overview.png)
 
@@ -13,7 +13,7 @@
 這一頁說明這個擴充功能做什麼、怎麼用。篇幅較長的主題各自獨立成頁（內容為英文）：
 
 - [大型檔案與唯讀預覽](large-files.md)：串流預覽、它的搜尋方式，以及決定一個檔案會用哪一種編輯器開啟的門檻。
-- [私有自動更新](updates.md)：更新從哪裡來、每台電腦一次性的驗證設定，以及更新相關設定。
+- [自動更新](updates.md)：公開 GitHub Releases、每台電腦的安裝方式，以及更新相關設定。
 - [發布與儲存庫設定](releasing.md)：維護者用的資料——PR 的種類、發布流程與 GitHub 保護設定。
 - [變更紀錄](../changelog.md)：每個版本改了什麼。
 
@@ -63,7 +63,7 @@
 
 可編輯格線是記憶體內的編輯器。超過 64 MiB 的本機檔案會改以串流唯讀預覽開啟；預覽會先把整個檔案讀過一遍，之後就能捲動與搜尋整個檔案。預覽能做到什麼、不能做到什麼，請見[大型檔案](large-files.md)。
 
-私有自動更新需要在每台電腦上做一次性的驗證設定，請見[私有自動更新](updates.md)。
+自動更新使用公開 GitHub Releases，不需要 Token 或登入，請見[自動更新](updates.md)。
 
 ## 授權
 

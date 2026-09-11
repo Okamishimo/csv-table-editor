@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Update installation failures now include the CLI error output and exit status
+  in the update log and manual-check warning, with credentials and URLs redacted.
+
+### Changed
+
+- Automatic updates read public GitHub Releases without a token or sign-in.
+  Legacy credentials are ignored; the existing authentication command now
+  clears saved credentials. Download verification and update throttling remain.
+
 ## [0.0.21] - 2026-09-11
 
 ### Fixed

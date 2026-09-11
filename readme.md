@@ -2,7 +2,7 @@
 
 Open, view and edit `.csv` and `.tsv` files as an editable grid inside VS Code, with first-class **encoding** support and a persistent **save history** you can diff and roll back to.
 
-> **This is a personal adaptation.** It builds on Edgar Dang's [CSV Table Editor](https://github.com/minlong8111/csv-table-editor), published on the Marketplace as `Edgar-Dang.csv-table-editor` under the MIT license. The original extension runtime is included unchanged as a vendor artifact, and the behavior added here — the streaming large-file preview, the encoding detector, the cell-level history diff, grid virtualization, column-scoped search and the private updater — is wired into it by modules of this repository's own. This build is distributed privately as a VSIX, is not the upstream extension, and its issues do not belong upstream.
+> **This is a personal adaptation.** It builds on Edgar Dang's [CSV Table Editor](https://github.com/minlong8111/csv-table-editor), published on the Marketplace as `Edgar-Dang.csv-table-editor` under the MIT license. The original extension runtime is included unchanged as a vendor artifact, and the behavior added here — the streaming large-file preview, the encoding detector, the cell-level history diff, grid virtualization, column-scoped search and the automatic updater — is wired into it by modules of this repository's own. This build is distributed as a VSIX through public GitHub Releases, is not the upstream extension, and its issues do not belong upstream.
 
 ![CSV Table Editor overview](https://raw.githubusercontent.com/minlong8111/assets/main/csv-table-editor/screenshot-overview.png)
 
@@ -13,7 +13,7 @@ Open, view and edit `.csv` and `.tsv` files as an editable grid inside VS Code, 
 This page covers what the extension does and how to use it. The longer subjects have pages of their own:
 
 - [Large files and the read-only preview](docs/large-files.md) — the streaming preview, its search, and the limits that decide which editor a file opens in.
-- [Private automatic updates](docs/updates.md) — where updates come from, the one-time authentication on each computer, and the update settings.
+- [Automatic updates](docs/updates.md) — public GitHub Releases, installation on each computer, and the update settings.
 - [Releasing and repository setup](docs/releasing.md) — maintainer material: PR kinds, the release workflow, and GitHub protection.
 - [Change log](changelog.md) — what changed in each version.
 
@@ -63,7 +63,7 @@ No additional setup. Encoding conversion is handled by the bundled [`iconv-lite`
 
 The editable grid is an in-memory editor. Local files larger than 64 MiB open in a streaming, read-only preview instead, which reads the whole file before you browse it and then lets you scroll and search all of it. See [large files](docs/large-files.md) for what that preview can and cannot do.
 
-Private automatic updates require a one-time authentication setup on each computer; see [private automatic updates](docs/updates.md).
+Automatic updates use public GitHub Releases without a token or sign-in; see [automatic updates](docs/updates.md).
 
 ## License
 
