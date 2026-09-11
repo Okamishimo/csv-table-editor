@@ -2,19 +2,13 @@
 
 Where updates come from, how to install on each computer, and what the updater does on its own. Back to the [readme](../readme.md).
 
-Stable updates come exclusively from public [`Okamishimo/csv-table-editor` GitHub Releases](https://github.com/Okamishimo/csv-table-editor/releases). No GitHub account, token, or sign-in is required. This extension is packaged as a VSIX and is never published to the public Marketplace. The extension ID remains `Edgar-Dang.csv-table-editor` so existing installations are upgraded in place.
+Stable updates come exclusively from public [`Okamishimo/csv-table-editor` GitHub Releases](https://github.com/Okamishimo/csv-table-editor/releases). No GitHub account, token, or sign-in is required. This extension is packaged as a VSIX and is never published to the public Marketplace. The extension ID is `Okamishimo.csv-table-editor`, separate from the upstream Marketplace extension `Edgar-Dang.csv-table-editor`. VS Code identifies extensions by publisher and name, so this build no longer shares the original extension's Marketplace listing or update identity.
 
 ## First installation on each computer
 
 1. Download the latest stable release's `csv-table-editor-<version>-enhanced.vsix` from the Releases page.
 2. In VS Code, run **Extensions: Install from VSIX…**, select the file, and reload VS Code. The updater supports installed desktop extensions on macOS and Windows. It does not update Remote SSH, WSL, container, web, or Extension Development Host installations.
 3. Run **CSV Table Editor: Check for Extension Updates** to check now. If you use a named VS Code profile, first set `csvTableEditor.updates.profileName` to its exact name in User Settings. Default profiles need no extra setting. No `code` PATH setup is required.
-
-## Moving from private updates
-
-This change first ships in a release containing the public updater. Earlier builds still require authentication even after the repository becomes public. If their saved credentials still work, they can install that release through the existing updater. Otherwise, install its VSIX manually once. Versions through 0.0.9 also need a manual upgrade because they have no updater.
-
-The public updater ignores all previous authentication settings and saved tokens, including expired tokens. **CSV Table Editor: Clear Saved Update Authentication** removes this extension's old SecretStorage token and authentication preference without signing other extensions out of GitHub. The command retains the ID `csvTableEditor.configureUpdateAuthentication` for existing keybindings. Clearing credentials does not disable automatic updates; use `csvTableEditor.updates.enabled` for that.
 
 ## Update behavior and settings
 

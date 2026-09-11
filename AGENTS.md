@@ -399,8 +399,10 @@ cache instead of reusing data decoded with the previous encoding.
 
 - Updates come only from `Okamishimo/csv-table-editor`, a public GitHub
   repository. Do not publish this extension to the public VS Code Marketplace.
-  Preserve the extension ID `Edgar-Dang.csv-table-editor` so existing
-  installations are upgraded in place.
+  Use the independent extension ID `Okamishimo.csv-table-editor`; reusing
+  `Edgar-Dang.csv-table-editor` links this adaptation to the original Marketplace
+  extension. Keep publisher/name validation strict.
+  Do not automatically uninstall them or overwrite their save history.
 - `onStartupFinished` activates the extension. The distribution hook registers
   the CSV editor before starting the updater, and isolates updater initialization
   failures. Keep updates independent of normal CSV editing.

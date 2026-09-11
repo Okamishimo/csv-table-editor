@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.23] - 2026-09-12
+
+### Fixed
+
+- Use the independent extension ID `Okamishimo.csv-table-editor` so VS Code no
+  longer associates this adaptation with the original Marketplace listing.
+
 ## [0.0.22] - 2026-09-11
 
 ### Fixed
