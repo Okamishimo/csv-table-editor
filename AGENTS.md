@@ -78,7 +78,7 @@ into the original runtime by `scripts/patch-distribution.js`.
   last in the decorator chain.
 - `src/save-progress.js`: Grid requests that never answer a save with nothing,
   and status-bar reporting for a save slow enough to notice.
-- `src/private-updater.js`: Commands, legacy credential cleanup, persistent check timing,
+- `src/private-updater.js`: Update command, persistent check timing,
   cross-window locking, installation coordination, and reload prompts.
 - `src/github-release-client.js`: Unauthenticated public GitHub API access and bounded
   streaming downloads with restricted redirects and sanitized errors.
@@ -406,9 +406,8 @@ cache instead of reusing data decoded with the previous encoding.
 - `onStartupFinished` activates the extension. The distribution hook registers
   the CSV editor before starting the updater, and isolates updater initialization
   failures. Keep updates independent of normal CSV editing.
-- Preserve commands `csvTableEditor.checkForUpdates` and
-  `csvTableEditor.configureUpdateAuthentication`. The latter clears legacy
-  credentials; it must not request tokens or GitHub sessions. Automatic and manual
+- Expose only `csvTableEditor.checkForUpdates` for updates. Do not register or
+  contribute an authentication configuration or cleanup command. Automatic and manual
   checks use public releases without reading saved credentials or sending an
   Authorization header. Keep legacy storage names for update state and locks so
   the transition preserves throttling and installed-version markers.

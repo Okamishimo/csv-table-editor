@@ -7,7 +7,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const test = require("node:test");
 const { ZipFile } = require("yazl");
-const { createUpdater, acquireLock, readState, writeState, TOKEN_KEY, AUTH_KEY } = require("../src/private-updater");
+const { createUpdater, acquireLock, readState, writeState } = require("../src/private-updater");
 const { isNewer, selectRelease, parseChecksum, verifyVsixManifest, UpdateError } = require("../src/update-artifact");
 const { cliInvocation, installVsix } = require("../src/update-installer");
 const { releaseInfo, ensureAssetsAvailable } = require("../scripts/private-release");
@@ -188,8 +188,8 @@ test("rate-limit retry delay survives restarts and manual requests", async (t) =
 test("public updates install without authentication, including legacy token, OAuth and disconnected profiles", async (t) => {
   for (const method of [undefined, "token", "github", "none"]) {
     const h = await harness(t);
-    h.values.set(AUTH_KEY, method);
-    h.secrets.set(TOKEN_KEY, "expired-legacy-secret");
+    h.values.set("privateUpdates.authMethod", method);
+    h.secrets.set("privateUpdates.githubToken", "expired-legacy-secret");
     h.context.secrets.get = async () => { throw new Error("must not read old credentials"); };
     h.vscode.authentication.getSession = async () => { throw new Error("must not request a session"); };
     h.vscode.window.showQuickPick = h.vscode.window.showInputBox = async () => { throw new Error("must not prompt for authentication"); };
@@ -199,30 +199,6 @@ test("public updates install without authentication, including legacy token, OAu
     assert.equal(h.installs.length, 1);
     assert.doesNotMatch(JSON.stringify([...h.messages, ...h.logs]), /expired-legacy-secret/);
   }
-});
-
-test("legacy authentication command removes credentials without disabling public updates or signing out GitHub", async (t) => {
-  const h = await harness(t);
-  h.values.set(AUTH_KEY, "token");
-  h.secrets.set(TOKEN_KEY, "expired-legacy-secret");
-  await h.updater.configureAuthentication();
-  assert.equal(h.secrets.has(TOKEN_KEY), false);
-  assert.equal(h.values.get(AUTH_KEY), undefined);
-  assert.equal(h.authCalls.length, 0);
-  assert.equal(h.config.enabled, true);
-  assert.match(h.messages[0].message, /cleared.*do not require/);
-  await h.updater.check();
-  assert.equal(h.installs.length, 1);
-});
-
-test("legacy credential cleanup failure is sanitized and does not block public updates", async (t) => {
-  const h = await harness(t);
-  h.context.secrets.delete = async () => { throw new Error("secret-storage-details"); };
-  await h.updater.configureAuthentication();
-  assert.equal(h.messages[0].warning, true);
-  assert.doesNotMatch(JSON.stringify([...h.messages, ...h.logs]), /secret-storage-details/);
-  await h.updater.check();
-  assert.equal(h.installs.length, 1);
 });
 
 test("checksum mismatch, installer failure and disposal never mark an update installed", async (t) => {
