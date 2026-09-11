@@ -4,7 +4,7 @@
 
 英文版：[readme.md](../readme.md)。
 
-> **這是個人改編版。** 本專案以 Edgar Dang 的 [CSV Table Editor](https://github.com/minlong8111/csv-table-editor) 為基礎，原版以 `Edgar-Dang.csv-table-editor` 發佈於 Marketplace，採 MIT 授權。原版擴充功能的執行檔原封不動沿用，此處新增的行為——大檔串流預覽、編碼偵測、儲存格層級的歷史比對、格線虛擬化、欄位範圍搜尋與自動更新器——則由本專案自己的模組接上去。本版本使用獨立的擴充套件 ID `Okamishimo.csv-table-editor`，透過公開 GitHub Releases 以 VSIX 散布。VS Code 不再將它連結到原版 Marketplace 頁面，相關問題請回報到本專案。
+> **這是個人改編版。** 本專案以 Edgar Dang 的 [CSV Table Editor](https://github.com/minlong8111/csv-table-editor) 為基礎，採 MIT 授權。原版擴充功能的執行檔原封不動沿用，此處新增的行為——大檔串流預覽、編碼偵測、儲存格層級的歷史比對、格線虛擬化、欄位範圍搜尋與自動更新器——則由本專案自己的模組接上去。本版本透過公開 GitHub Releases 以 VSIX 散布，相關問題請回報到本專案。
 
 ![CSV Table Editor 總覽](https://raw.githubusercontent.com/minlong8111/assets/main/csv-table-editor/screenshot-overview.png)
 
@@ -13,7 +13,7 @@
 這一頁說明這個擴充功能做什麼、怎麼用。篇幅較長的主題各自獨立成頁（內容為英文）：
 
 - [大型檔案與唯讀預覽](large-files.md)：串流預覽、它的搜尋方式，以及決定一個檔案會用哪一種編輯器開啟的門檻。
-- [自動更新](updates.md)：公開 GitHub Releases、每台電腦的安裝方式，以及更新相關設定。
+- [自動更新](updates.md)：公開 GitHub Releases 與更新相關設定。
 - [發布與儲存庫設定](releasing.md)：維護者用的資料——PR 的種類、發布流程與 GitHub 保護設定。
 - [變更紀錄](../changelog.md)：每個版本改了什麼。
 
