@@ -63,7 +63,7 @@
 
 可編輯格線是記憶體內的編輯器。超過 64 MiB 的本機檔案會改以串流唯讀預覽開啟；預覽會先把整個檔案讀過一遍，之後就能捲動與搜尋整個檔案。預覽能做到什麼、不能做到什麼，請見[大型檔案](large-files.md)。
 
-自動更新使用公開 GitHub Releases，不需要 Token 或登入。若從 ID 為 `Edgar-Dang.csv-table-editor` 的版本升級，請先手動安裝一次新版 VSIX，並停用舊擴充套件後再重新載入。安裝方式與儲存歷史的搬移說明請見[自動更新與遷移](updates.md)。
+自動更新使用公開 GitHub Releases，不需要 Token 或登入，請見[自動更新](updates.md)。
 
 ## 授權
 

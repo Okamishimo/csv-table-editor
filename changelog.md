@@ -14,8 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use the independent extension ID `Okamishimo.csv-table-editor` so VS Code no
   longer associates this adaptation with the original Marketplace listing.
-  Existing `Edgar-Dang.csv-table-editor` installations need one manual VSIX
-  installation and must be disabled; save-history migration is documented.
 
 ## [0.0.22] - 2026-09-11
 

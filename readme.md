@@ -63,7 +63,7 @@ No additional setup. Encoding conversion is handled by the bundled [`iconv-lite`
 
 The editable grid is an in-memory editor. Local files larger than 64 MiB open in a streaming, read-only preview instead, which reads the whole file before you browse it and then lets you scroll and search all of it. See [large files](docs/large-files.md) for what that preview can and cannot do.
 
-Automatic updates use public GitHub Releases without a token or sign-in. If upgrading from a build identified as `Edgar-Dang.csv-table-editor`, install the new VSIX manually once and disable the old extension before reloading. See [automatic updates and migration](docs/updates.md) for installation and save-history migration.
+Automatic updates use public GitHub Releases without a token or sign-in; see [automatic updates](docs/updates.md).
 
 ## License
 

@@ -10,22 +10,6 @@ Stable updates come exclusively from public [`Okamishimo/csv-table-editor` GitHu
 2. In VS Code, run **Extensions: Install from VSIX…**, select the file, and reload VS Code. The updater supports installed desktop extensions on macOS and Windows. It does not update Remote SSH, WSL, container, web, or Extension Development Host installations.
 3. Run **CSV Table Editor: Check for Extension Updates** to check now. If you use a named VS Code profile, first set `csvTableEditor.updates.profileName` to its exact name in User Settings. Default profiles need no extra setting. No `code` PATH setup is required.
 
-## Moving from the original extension ID
-
-Earlier builds of this adaptation, including 0.0.22, used `Edgar-Dang.csv-table-editor`. VS Code treated them as the original Marketplace extension. Starting with 0.0.23, this adaptation uses `Okamishimo.csv-table-editor` instead.
-
-1. Save any open CSV edits. In Extensions, disable `Edgar-Dang.csv-table-editor` in each profile where it is installed. Keeping both enabled would register the same editor and commands twice.
-2. Install 0.0.23 or later through **Extensions: Install from VSIX…** and reload the window. This is a one-time manual installation: the old updater correctly rejects the new publisher, and this VSIX does not replace or uninstall the old extension.
-3. Check the installed extension's ID is `Okamishimo.csv-table-editor`. Future updates use this identity and the same GitHub Releases source.
-
-The `csvTableEditor.*` settings and command IDs stay the same. Saved CSV files are unaffected. VS Code gives the new extension its own storage, so saved history, update timing, and legacy credentials are not automatically transferred.
-
-To retain save history, close all VS Code windows and back up the old extension's storage first. Copy only its `history` subfolder from the active profile's `globalStorage/edgar-dang.csv-table-editor/` to `globalStorage/okamishimo.csv-table-editor/`, keeping the old copy. Do this before saving files with the new extension. If the new `history` folder already exists, back up both and do not overwrite it; choose which history to retain. Do not copy `private-updates`, lock files, or VS Code state databases. After confirming the new installation and any history you need, the disabled old extension can be uninstalled.
-
-## Legacy update authentication
-
-Public updates require no authentication. In 0.0.22, **CSV Table Editor: Clear Saved Update Authentication** removes that extension's stored token before it is disabled. A command running under the new ID cannot clear another extension's SecretStorage. The command retains `csvTableEditor.configureUpdateAuthentication` for existing keybindings; clearing credentials does not disable updates or sign other extensions out of GitHub.
-
 ## Update behavior and settings
 
 - `csvTableEditor.updates.enabled` defaults to `true`. Disable it to stop automatic checks; the manual command still works.
