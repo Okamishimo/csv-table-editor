@@ -415,3 +415,23 @@ test("without measurable layout the table keeps automatic column sizing", () => 
   const { document } = openGrid(csvText(400));
   assert.equal(document.querySelector("#grid-wrap table").style.tableLayout, "");
 });
+
+test("read-only mode survives virtual window replacement without moving or rebuilding it on toggle", (t) => {
+  const h = openGrid(csvText(10000));
+  t.after(() => h.window.close());
+  h.scrollTo(26000);
+  const first = h.document.querySelector('td[data-r]');
+  const row = first.dataset.r;
+  const offset = h.wrap.scrollTop;
+  h.document.getElementById('edit-mode').click();
+  assert.equal(h.wrap.scrollTop, offset);
+  assert.equal(h.document.querySelector('td[data-r]'), first, 'toggle only updates the rendered cells');
+  h.scrollTo(52000);
+  assert.notEqual(h.document.querySelector('td[data-r]').dataset.r, row);
+  assert.ok(dataRows(h.document).length < 50);
+  assert.ok([...h.document.querySelectorAll('.cell')].every(cell => cell.getAttribute('contenteditable') === 'false'));
+  h.document.getElementById('edit-mode').click();
+  h.scrollTo(78000);
+  assert.ok([...h.document.querySelectorAll('.cell')].every(cell => cell.getAttribute('contenteditable') === 'true'));
+  assert.equal(h.postedMessages.filter(m => m.type === 'edit').length, 0);
+});

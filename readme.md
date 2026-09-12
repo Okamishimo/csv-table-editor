@@ -23,6 +23,7 @@ This page covers what the extension does and how to use it. The longer subjects 
 
 - Opens CSV/TSV files in a spreadsheet-like grid — no external tools.
 - Inline cell editing; add or remove rows and columns.
+- For files that open in the editable grid, use the toolbar's **Editable / Read-only** switch to lock or unlock editing. Files start editable; the switch applies to the current editor session and preserves unsaved edits. Read-only mode keeps search, selection, copying, view-only sorting and multiline expansion available, but blocks cell/row/column changes, undo/redo, history rollback and encoding changes. You can still save edits made before locking. Large-file previews remain read-only.
 - Multi-line cells show one and a half lines by default. Double-click a cell to expand it; double-click again to collapse it. This also works in the read-only preview.
 - Only the rows near the viewport are rendered, so long files scroll, sort and search without the editor building a DOM for every row.
 - Full undo/redo through the standard `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`.
