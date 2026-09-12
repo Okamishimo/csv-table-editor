@@ -118,6 +118,33 @@ const replacements = [
     name: "delta undo dispatch",
     from: 'registerEdit(e,t,n,i){const r=this._panels.get(e);this._onDidChangeCustomDocument.fire({document:e,label:t,undo:()=>{r&&this.post(r,{type:"applySnapshot",grid:i})},redo:()=>{r&&this.post(r,{type:"applySnapshot",grid:n})}})}',
     to: 'registerEdit(e,t,n,i){const r=this._panels.get(e);this._onDidChangeCustomDocument.fire({document:e,label:t,undo:()=>{r&&this.post(r,{type:"applyEdit",op:n})},redo:()=>{r&&this.post(r,{type:"applyEdit",op:i})}})}',
+    // The next patch validates and upgrades the delta implementation.
+    already: 'registerEdit(e,t,n,i){',
+  },
+  {
+    name: "read-only undo guard",
+    from: 'registerEdit(e,t,n,i){const r=this._panels.get(e);this._onDidChangeCustomDocument.fire({document:e,label:t,undo:()=>{r&&this.post(r,{type:"applyEdit",op:n})},redo:()=>{r&&this.post(r,{type:"applyEdit",op:i})}})}',
+    to: 'registerEdit(e,t,n,i){return require("../src/edit-mode").registerEdit(this,e,t,n,i)}',
+  },
+  {
+    name: "read-only mode messages",
+    from: 'onMessage(e,t){switch(t.type){',
+    to: 'onMessage(e,t){if(require("../src/edit-mode").handleMessage(e,t))return;switch(t.type){',
+  },
+  {
+    name: "read-only history rollback guard",
+    from: 'const o=(0,d.decode)(i,n);e.setEncodingKey(n)',
+    to: 'const o=(0,d.decode)(i,n);if(!require("../src/edit-mode").canEdit(e,s))return;e.setEncodingKey(n)',
+  },
+  {
+    name: "read-only encoding reopen guard",
+    from: 't&&await e.reopenWithEncoding((0,d.encodingKey)(t))',
+    to: 't&&require("../src/edit-mode").canEdit(e,s)&&await e.reopenWithEncoding((0,d.encodingKey)(t))',
+  },
+  {
+    name: "read-only encoding save guard",
+    from: 't&&(e.setEncodingKey((0,d.encodingKey)(t)),await this.saveDocument(e)',
+    to: 't&&require("../src/edit-mode").canEdit(e,s)&&(e.setEncodingKey((0,d.encodingKey)(t)),await this.saveDocument(e)',
   },
   {
     name: "cell-level history diff",

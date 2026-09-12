@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An **Editable / Read-only** toolbar switch for files in the editable grid.
+  Locking preserves unsaved edits and browsing features while preventing new
+  edits, undo/redo, history rollback and encoding changes. Large-file previews
+  remain read-only.
+
 ### Changed
 
 - Remove the update authentication cleanup command. Only **Check for Extension

@@ -333,6 +333,7 @@ test("patched provider resolves oversized local files with the streaming webview
     };
     await provider.resolveCustomEditor(document, panel, null);
     assert.match(panel.webview.html, /Read-only preview/);
+    assert.doesNotMatch(panel.webview.html, /id="edit-mode"|contenteditable="true"/);
     document.dispose();
   } finally {
     await fs.promises.rm(temporaryDirectory, { recursive: true, force: true });
@@ -375,4 +376,62 @@ test("actual provider captures every rapid save and save-as in the patched histo
   await provider.saveCustomDocumentAs(document, copy, {});
   assert.equal((await provider._history.list(copy)).length, 1);
   assert.equal(files.get(copy.toString()).toString(), "7");
+});
+
+test("actual provider enforces the document lock for undo, redo, rollback and encoding", async () => {
+  const messages = [];
+  const edits = [];
+  const notices = [];
+  const providerType = loadBundleInternals({ window: {
+    showInformationMessage: message => notices.push(message),
+  } })(248).CsvEditorProvider;
+  const provider = Object.create(providerType.prototype);
+  const doc = { uri: { path: '/lock.csv' }, setEncodingKey() { throw new Error('encoding changed'); } };
+  provider._panels = new Map([[doc, { webview: { postMessage: m => messages.push(m) } }]]);
+  provider._onDidChangeCustomDocument = { fire: e => edits.push(e) };
+  provider._history = { get: async () => Buffer.from('id,name\n1,old') };
+  let encodingCalls = 0;
+  provider.encodingMenu = () => { encodingCalls++; };
+  provider.onMessage(doc, { type: 'edit', label: 'Cell', undo: { k: 'cell', v: 'old' }, redo: { k: 'cell', v: 'new' } });
+  assert.equal(edits.length, 1);
+  provider.onMessage(doc, { type: 'setReadOnly', readOnly: true });
+  assert.throws(() => edits[0].undo(), /read-only/);
+  assert.throws(() => edits[0].redo(), /read-only/);
+  await provider.rollbackTo(doc, 'version', 'utf8');
+  assert.match(notices[0], /read-only/);
+  provider.onMessage(doc, { type: 'pickEncoding' });
+  provider.onMessage(doc, { type: 'edit', label: 'Blocked' });
+  assert.equal(encodingCalls, 0);
+  assert.equal(edits.length, 1);
+  assert.equal(messages.length, 0);
+  provider.onMessage(doc, { type: 'setReadOnly', readOnly: false });
+  edits[0].undo();
+  edits[0].redo();
+  assert.deepEqual(messages.map(m => m.op.v), ['old', 'new']);
+  provider.onMessage(doc, { type: 'pickEncoding' });
+  assert.equal(encodingCalls, 1);
+});
+
+test("locking while an encoding picker is open prevents both reopen and save", async () => {
+  for (const action of ['reopen', 'save']) {
+    const notices = [];
+    let finishPick;
+    const providerType = loadBundleInternals({ window: {
+      showQuickPick: async () => ({ id: action }),
+      showInformationMessage: message => notices.push(message),
+    } })(248).CsvEditorProvider;
+    const provider = Object.create(providerType.prototype);
+    provider.pickEncoding = () => new Promise(resolve => { finishPick = resolve; });
+    const doc = {
+      reopenWithEncoding() { assert.fail('must not reopen'); },
+      setEncodingKey() { assert.fail('must not change encoding'); },
+    };
+    provider.saveDocument = () => assert.fail('must not save with a different encoding');
+    const pending = provider.encodingMenu(doc);
+    await new Promise(resolve => setImmediate(resolve));
+    provider.onMessage(doc, { type: 'setReadOnly', readOnly: true });
+    finishPick({ id: 'utf8', label: 'UTF-8' });
+    await pending;
+    assert.match(notices[0], /read-only/);
+  }
 });

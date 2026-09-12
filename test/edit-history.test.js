@@ -128,6 +128,9 @@ test("expanded multiline editing preserves line breaks through save, undo and re
 
 test("decorator is idempotent and refuses a bundle it does not recognise", () => {
   const once = decoratedGridHtml();
+  const editMode = require('../src/edit-mode');
+  assert.equal(editMode.decorateWebviewHtml(once), once);
+  assert.throws(() => editMode.decorateWebviewHtml('<html></html>'), /Cannot add edit mode switch/);
   assert.equal(editHistory.decorateWebviewHtml(once), once);
   assert.throws(
     () => editHistory.decorateWebviewHtml("<html><body>nothing to patch</body></html>"),
@@ -326,4 +329,86 @@ test("saving rapid edits flushes the focused cell once and preserves undo deltas
   h.record();
   h.undo();
   assert.equal(h.grid()[2][1], "Bob");
+});
+
+test("read-only toggle preserves the active edit and blocks editing until unlocked", (t) => {
+  const h = openGrid(SAMPLE);
+  t.after(() => h.window.close());
+  const button = h.document.getElementById('edit-mode');
+  const cell = h.document.querySelector('td[data-r="1"][data-c="1"] .cell');
+  assert.equal(button.textContent, 'Editable');
+  cell.focus();
+  cell.textContent = 'Unsaved';
+  h.click('#edit-mode');
+  assert.equal(button.textContent, 'Read-only');
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.equal(h.grid()[1][1], 'Unsaved');
+  assert.equal(h.edits().length, 1, 'focused edit is committed exactly once before locking');
+  assert.deepEqual(h.posted.filter(m => ['edit', 'setReadOnly'].includes(m.type)).map(m => m.type),
+    ['edit', 'setReadOnly']);
+  assert.ok(h.document.getElementById('add-row').disabled);
+  assert.ok(h.document.getElementById('add-col').disabled);
+  assert.equal(h.document.getElementById('enc-label').getAttribute('aria-disabled'), 'true');
+  assert.equal(h.window.getComputedStyle(h.document.querySelector('[data-delrow]')).visibility, 'hidden');
+  assert.ok([...h.document.querySelectorAll('.cell')].every(c => c.getAttribute('contenteditable') === 'false'));
+  const before = h.grid();
+  for (const selector of ['#add-row', '#add-col', '[data-delrow="1"]', '[data-delcol="1"]', '#enc-label']) h.click(selector);
+  h.send({ type: 'rollback', text: 'lost,data', encodingLabel: 'UTF-8' });
+  const input = new h.window.InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertFromPaste' });
+  cell.dispatchEvent(input);
+  assert.ok(input.defaultPrevented);
+  const cut = new h.window.InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteByCut' });
+  cell.dispatchEvent(cut);
+  assert.ok(cut.defaultPrevented);
+  const undo = new h.window.KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+  cell.dispatchEvent(undo);
+  assert.ok(undo.defaultPrevented);
+  const copy = new h.window.Event('copy', { bubbles: true, cancelable: true });
+  cell.dispatchEvent(copy);
+  assert.equal(copy.defaultPrevented, false);
+  assert.deepEqual(h.grid(), before);
+  assert.equal(h.edits().length, 1);
+  assert.equal(h.posted.some(m => m.type === 'pickEncoding'), false);
+  h.click('#edit-mode');
+  assert.equal(button.textContent, 'Editable');
+  assert.equal(cell.getAttribute('contenteditable'), 'true');
+  editCell(h, 1, 1, 'Edited again');
+  assert.equal(h.grid()[1][1], 'Edited again');
+  h.undo();
+  assert.equal(h.grid()[1][1], 'Unsaved');
+});
+
+test("read-only browsing keeps search, row and column selection, sorting and multiline expansion", async (t) => {
+  const h = openGrid('id,note\n1,"match\nsecond\n"\n2,match');
+  t.after(() => h.window.close());
+  const before = h.grid();
+  const search = h.document.getElementById('filter');
+  search.value = 'match';
+  search.dispatchEvent(new h.window.Event('input'));
+  await new Promise(resolve => setTimeout(resolve, require('../src/grid-performance').SEARCH_DEBOUNCE_MS + 60));
+  const count = () => h.document.getElementById('filter-count').textContent;
+  assert.equal(count(), '1/2 results');
+  h.click('#edit-mode');
+  assert.equal(count(), '1/2 results');
+  search.dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.equal(count(), '2/2 results');
+  h.click('th[data-rowhead="1"]');
+  assert.equal(search.placeholder, 'Find in whole table', 'row numbers never limit search');
+  assert.equal(h.document.getElementById('search-scope').textContent, '');
+  h.click('th[data-colhead="1"]');
+  assert.equal(search.placeholder, 'Find in column note');
+  h.click('[data-sortcol="1"]');
+  assert.ok(h.document.querySelector('.sort-header.sorted'));
+  assert.equal(search.placeholder, 'Find in column note');
+  h.click('td[data-r="1"][data-c="1"] .cell');
+  assert.equal(search.placeholder, 'Find in whole table');
+  const cell = h.document.querySelector('td[data-r="1"][data-c="1"] .cell');
+  cell.dispatchEvent(new h.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.ok(cell.classList.contains('csv-expanded'));
+  cell.dispatchEvent(new h.window.MouseEvent('dblclick', { bubbles: true }));
+  assert.equal(cell.classList.contains('csv-expanded'), false);
+  assert.deepEqual(h.grid(), before);
+  assert.equal(h.edits().length, 0, 'browsing and toggling never mark the file dirty');
+  h.send({ type: 'setContent', text: 'id,note\n3,reloaded', encodingLabel: 'UTF-8' });
+  assert.equal(h.document.querySelector('.cell').getAttribute('contenteditable'), 'false');
 });

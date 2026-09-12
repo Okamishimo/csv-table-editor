@@ -301,7 +301,7 @@ function decorateWebviewHtml(html) {
     "commit the focused cell before saving or comparing history"
   );
 
-  return decorated;
+  return require("./edit-mode").decorateWebviewHtml(decorated);
 }
 
 module.exports = { decorateWebviewHtml };
