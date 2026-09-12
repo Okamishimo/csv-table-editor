@@ -63,8 +63,6 @@
 
 可編輯格線是記憶體內的編輯器。超過 64 MiB 的本機檔案會改以串流唯讀預覽開啟；預覽會先把整個檔案讀過一遍，之後就能捲動與搜尋整個檔案。預覽能做到什麼、不能做到什麼，請見[大型檔案](large-files.md)。
 
-自動更新使用公開 GitHub Releases，不需要 Token 或登入，請見[自動更新](updates.md)。
-
 ## 授權
 
 [MIT](https://github.com/Okamishimo/csv-table-editor/blob/HEAD/LICENSE.txt)，與本專案所改編的擴充功能相同。`LICENSE.txt` 同時保留兩份聲明：原始作品的著作權屬於 Edgar Dang，本改編版所做的變更著作權屬於 Mete (Okamishimo)。

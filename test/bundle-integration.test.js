@@ -55,7 +55,9 @@ test("actual bundle starts the updater after registering the editor and contains
   const context = { subscriptions: [], globalStorageUri: { fsPath: os.tmpdir() }, extension: { packageJSON: { version: "0.0.10" } } };
   webpackRequire.extensionExports.activate(context);
   assert.equal(editorRegistrations, 1);
-  assert.deepEqual(registered, ["csvTableEditor.checkForUpdates", "csvTableEditor.configureUpdateAuthentication"]);
+  assert.deepEqual(registered, ["csvTableEditor.checkForUpdates"]);
+  assert.deepEqual(require("../package.json").contributes.commands.map((entry) => entry.command), registered,
+    "the Command Palette must expose only the registered update-check command");
   for (const disposable of context.subscriptions) disposable.dispose();
   vscode.window.createOutputChannel = () => { throw new Error("updater unavailable"); };
   assert.doesNotThrow(() => webpackRequire.extensionExports.activate(context));

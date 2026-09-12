@@ -7,9 +7,6 @@ const { createClient } = require("./github-release-client");
 const { installVsix } = require("./update-installer");
 const { UpdateError, isNewer, selectRelease, parseChecksum, verifyVsixManifest } = require("./update-artifact");
 
-// Legacy keys are used only by the credential cleanup command.
-const TOKEN_KEY = "privateUpdates.githubToken";
-const AUTH_KEY = "privateUpdates.authMethod";
 const HOUR = 3600000;
 
 async function acquireLock(directory) {
@@ -174,20 +171,6 @@ function createUpdater(context, vscode, dependencies = {}) {
     try { await running; } finally { running = undefined; }
   }
 
-  // Keep the old command ID so existing keybindings can remove legacy credentials.
-  async function configureAuthentication() {
-    if (disposed) return;
-    try {
-      await context.secrets.delete(TOKEN_KEY);
-      await context.globalState.update(AUTH_KEY, undefined);
-      await vscode.window.showInformationMessage("Saved update authentication cleared. Public GitHub updates do not require a token or sign-in.");
-    } catch {
-      const message = "Saved update authentication could not be cleared. Public updates do not use these credentials.";
-      log(message);
-      if (!disposed) await vscode.window.showWarningMessage(message);
-    }
-  }
-
   function start() {
     startup = setTimeout(() => { void check(); }, 30000);
     interval = setInterval(() => { void check(); }, 5 * 60000);
@@ -200,15 +183,14 @@ function createUpdater(context, vscode, dependencies = {}) {
     clearInterval(interval);
     output.dispose();
   }
-  return { check, configureAuthentication, start, dispose };
+  return { check, start, dispose };
 }
 
 function activate(context, vscode) {
   const updater = createUpdater(context, vscode);
   context.subscriptions.push(updater,
-    vscode.commands.registerCommand("csvTableEditor.checkForUpdates", () => updater.check(true)),
-    vscode.commands.registerCommand("csvTableEditor.configureUpdateAuthentication", () => updater.configureAuthentication()));
+    vscode.commands.registerCommand("csvTableEditor.checkForUpdates", () => updater.check(true)));
   updater.start();
 }
 
-module.exports = { activate, createUpdater, acquireLock, readState, writeState, TOKEN_KEY, AUTH_KEY };
+module.exports = { activate, createUpdater, acquireLock, readState, writeState };

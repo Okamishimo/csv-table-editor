@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Remove the update authentication cleanup command. Only **Check for Extension
+  Updates** remains in the Command Palette for updates.
+
 ## [0.0.23] - 2026-09-12
 
 ### Fixed

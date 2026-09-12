@@ -99,11 +99,6 @@
 				"command": "csvTableEditor.checkForUpdates",
 				"title": "Check for Extension Updates",
 				"category": "CSV Table Editor"
-			},
-			{
-				"command": "csvTableEditor.configureUpdateAuthentication",
-				"title": "Clear Saved Update Authentication",
-				"category": "CSV Table Editor"
 			}
 		]
 	},
