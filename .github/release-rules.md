@@ -43,7 +43,9 @@ authorize commits, pushes, merges, or publication. Follow the current task scope
 - Before merging, `PR policy` and `Verify` must pass, the branch must be up to
   date with main, and all conversations must be resolved. This single-maintainer
   repository does not require an additional reviewer's approval.
-- Follow these collaboration rules even when the GitHub plan cannot enforce them.
+- GitHub enforces the PR requirement, required checks, up-to-date branch and
+  resolved conversations; see [Server protection](#server-protection-and-known-limits).
+  Follow these collaboration rules regardless of what the server enforces.
 
 ## Feature and Fix PRs
 
@@ -156,22 +158,22 @@ Topic branch -> staged verification -> commit -> push
 
 ## Server protection and known limits
 
-On 2026-09-06, API inspection and an attempt to apply main protection returned
-HTTP 403, requiring GitHub Pro for this private repository. This is a dated
-observation, not permanent state; query again when reporting current status.
-The project is moving to public distribution. Changing visibility does not itself
-prove that protection is enabled; query its current state after the change.
+The repository is public, and GitHub enforces protection through two repository
+rulesets. While it was private, protection returned HTTP 403 and required
+GitHub Pro; that no longer applies. On 2026-09-13 both rulesets were queried
+active. This is a dated observation; query again when reporting current status.
 
-- [main-protection.json](main-protection.json) is a prepared configuration requiring
-  PRs, GitHub Actions checks `PR policy` and `Verify`, an up-to-date branch, and
-  resolved conversations. It includes administrators and forbids main force
-  pushes and deletion.
-- [tag-protection.json](tag-protection.json) is a prepared configuration forbidding
-  tag updates and deletion. It does not restrict tag creation.
-- Configuration files do not prove server enforcement. Once the plan supports
-  protection, ensure the workflows are deployed and their checks have run, then
-  follow the [protection setup](../docs/releasing.md#server-protection-setup) and query the
-  resulting state. Do not create duplicate rulesets.
+- [main-protection.json](main-protection.json) is the `Protect main` ruleset. It
+  refuses direct pushes, force pushes and deletion of `main`, so every change
+  arrives through a merged PR. Merging requires GitHub Actions checks `PR policy`
+  and `Verify`, an up-to-date branch, and resolved conversations. It has no
+  bypass actors, so administrators are included.
+- [tag-protection.json](tag-protection.json) is the `Immutable tags` ruleset,
+  forbidding tag updates and deletion. It does not restrict tag creation.
+- Configuration files do not prove server enforcement. Query the rulesets when
+  reporting their state, and change them by updating the existing ruleset as the
+  [protection setup](../docs/releasing.md#server-protection-setup) describes. Do not
+  create duplicate rulesets or add classic branch protection alongside them.
 - GitHub tag rules have no native main-ancestry condition. Hooks can be bypassed;
   release CI rejects publication after a tag reaches GitHub. Do not describe
   these checks as preventing all invalid remote tags.
