@@ -10,11 +10,11 @@ The workflow is [`.github/workflows/private-release.yml`](../.github/workflows/p
 
 ## Pull requests
 
-Develop on a topic branch and merge through a PR. Release PRs into `main` must be named `Release vX.Y.Z: description`, for example `Release v0.0.16: protect the release workflow`. The stable version must match `package.json` and both root version fields in `package-lock.json`, be newer than main, and not already have a tag. `PR policy` and `Verify` checks validate these rules and run the complete build, tests, and patch idempotency check. Editing the PR title reruns the checks.
+Develop on a topic branch and merge through a PR; GitHub refuses direct pushes to `main`. New behavior uses `Feature: description` and corrections use `Fix: description`. Neither changes the version, and merging one creates no tag or Release; the work waits on main until a release publishes it. Release PRs into `main` must be named `Release vX.Y.Z: description`, for example `Release v0.0.16: protect the release workflow`. The stable version must match `package.json` and both root version fields in `package-lock.json`, be newer than main, and not already have a tag. `PR policy` and `Verify` checks validate these rules and run the complete build, tests, and patch idempotency check. Editing the PR title reruns the checks.
 
 Documentation-only PRs use `Docs: description`, for example `Docs: clarify the release guide`. They require no version bump and create no tag or Release after merging. Quick CI checks validate the full PR diff against a strict documentation allowlist and run `git diff --check`; no dependency install or full test suite is needed for this PR type. `Verify` records the successful quick checks while retaining the same required check names as Release PRs.
 
-The allowlist covers `readme.md`, `changelog.md`, `AGENTS.md`, `CLAUDE.md`, `.github/release-rules.md`, Markdown under `docs/`, and `SKILL.md` or Markdown references in named skills under `.agents/skills/` and `.claude/skills/`. Source code, tests, scripts, workflows, manifests, lockfiles, hooks, configuration, and media require a Release PR. Mixing any of them into a Docs PR fails, even if code is renamed into a Markdown path. Symlinks and executable files also fail. The local pre-commit hook continues to run full staged verification for every commit; only documentation PR CI uses quick checks.
+The allowlist covers `readme.md`, `changelog.md`, `AGENTS.md`, `CLAUDE.md`, `.github/release-rules.md`, Markdown under `docs/`, and `SKILL.md` or Markdown references in named skills under `.agents/skills/` and `.claude/skills/`. Source code, tests, scripts, workflows, manifests, lockfiles, hooks, configuration, and media require a Feature, Fix, or Release PR. Mixing any of them into a Docs PR fails, even if code is renamed into a Markdown path. Symlinks and executable files also fail. The local pre-commit hook continues to run full staged verification for every commit; only documentation PR CI uses quick checks.
 
 ## Working locally
 
@@ -40,14 +40,26 @@ The release workflow checks out the tag, validates its package version, installs
 
 ## Server protection setup
 
-On 2026-09-06, while the repository was private, GitHub rejected protection API access with HTTP 403 because the plan required **GitHub Pro**. This is historical state, not a check of current protection. After changing repository visibility, query protection and existing rulesets again. To apply the prepared configuration when supported, run from the repository root:
+Protection is enforced by two repository rulesets. The repository is public, so no paid plan is needed; while it was private, GitHub rejected protection with HTTP 403 and required **GitHub Pro**. As of 2026-09-13 both rulesets are active:
+
+- **Protect main** ([`.github/main-protection.json`](../.github/main-protection.json)) targets `main`. Every change must arrive through a merged PR: direct pushes, force pushes and deletion are refused. Merging requires passing `PR policy` and `Verify` checks from GitHub Actions, a branch up to date with main, and resolved conversations; a new push dismisses earlier approvals. No extra reviewer approval is required. There are no bypass actors, so administrators follow the same rules.
+- **Immutable tags** ([`.github/tag-protection.json`](../.github/tag-protection.json)) targets every tag and forbids updating or deleting one. It does not restrict tag creation, which the merge workflow needs.
+
+A file in the repository is not proof of what GitHub enforces. Query the live state before reporting it:
 
 ```sh
-gh api --method PUT repos/Okamishimo/csv-table-editor/branches/main/protection --input .github/main-protection.json
-gh api --method POST repos/Okamishimo/csv-table-editor/rulesets --input .github/tag-protection.json
+gh api repos/Okamishimo/csv-table-editor/rulesets
+gh api repos/Okamishimo/csv-table-editor/rules/branches/main
 ```
 
-Apply these after the PR workflow is on main and its checks have run. Main then requires PRs, passing `PR policy` and `Verify` checks from GitHub Actions, an up-to-date branch, and resolved conversations. Administrators are included; force pushes and deletion are disabled. No extra reviewer approval is required. The tag ruleset forbids updating/deleting tags; inspect existing rulesets before applying it again to avoid duplicates.
+To change a ruleset, edit its file and update the existing ruleset by ID rather than creating another one, which would duplicate it. Do not add classic branch protection alongside the ruleset. From the repository root:
+
+```sh
+gh api --method PUT repos/Okamishimo/csv-table-editor/rulesets/<ruleset-id> --input .github/main-protection.json
+gh api --method PUT repos/Okamishimo/csv-table-editor/rulesets/<ruleset-id> --input .github/tag-protection.json
+```
+
+Use `--method POST repos/Okamishimo/csv-table-editor/rulesets` only when the ruleset list shows that one is missing. A required check must have run on the repository before it can be required, so a renamed `PR policy` or `Verify` job has to reach main before the ruleset names it.
 
 GitHub tag rules have no native "commit belongs to main" condition. The hooks can be bypassed and release CI rejects an invalid tag **after** it reaches GitHub. To prohibit all manual tag creation server-side, configure a dedicated GitHub App as the only bypass actor for a tag-creation restriction and let that App's workflow validate main ancestry before creating tags. This extra App setup is not enabled by the supplied configurations.
 
