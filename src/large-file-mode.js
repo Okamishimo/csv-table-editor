@@ -1297,7 +1297,7 @@ function getLargeFileWebviewHtml() {
     let columns = page.header.length;
     for (const row of page.rows) columns = Math.max(columns, row.length);
     if (!replacing) columns = Math.max(columns, (table.querySelector('colgroup')?.children.length || 1) - 1);
-    applyFixedColumnLayout(table, columns);
+    applyFixedColumnLayout(table, columns, Math.max(totalRows + 1, page.startRow + page.rows.length - 1));
     if (replacing || !head.firstChild) {
       head.replaceChildren();
       const headerRow = document.createElement('tr');
@@ -1938,6 +1938,9 @@ function getLargeFileWebviewHtml() {
       // times over. Nothing about the rendered rows changes while it reads, so
       // only the finished count is worth measuring and re-spacing for.
       if (!preparing) {
+        const table = byId('rows').closest('table');
+        const columns = table.querySelector('colgroup')?.children.length;
+        if (columns) applyFixedColumnLayout(table, columns - 1, totalRows + 1);
         rowHeight = measureRowHeight();
         updateSpacers();
       }

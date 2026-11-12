@@ -379,13 +379,49 @@ test("column widths ignore content and scrolling, with an explicit fixed table w
   const columnWidths = () => Array.from(table.querySelectorAll('col'), col => col.style.width);
 
   assert.equal(table.style.tableLayout, "fixed");
-  assert.equal(table.style.width, '681px', 'fixed layout needs a definite total width');
+  assert.equal(table.style.width, 'calc(601px + var(--csv-row-number-width))', 'fixed layout needs a definite total width');
   assert.equal(window.getComputedStyle(table).minWidth, '0px');
-  assert.deepEqual(columnWidths(), ["80px", "200px", "200px", "200px"]);
+  assert.deepEqual(columnWidths(), ["var(--csv-row-number-width)", "200px", "200px", "200px"]);
 
   scrollTo(80000);
-  assert.deepEqual(columnWidths(), ["80px", "200px", "200px", "200px"]);
-  assert.equal(table.style.width, '681px');
+  assert.deepEqual(columnWidths(), ["var(--csv-row-number-width)", "200px", "200px", "200px"]);
+  assert.equal(table.style.width, 'calc(601px + var(--csv-row-number-width))');
+});
+
+test("short files keep a compact row-number column even with only one data column", (t) => {
+  for (const text of ['name', 'name\nvalue', 'name\na\nb\nc']) {
+    const { window, document } = openGrid(text, { headerWidths: () => 1000 });
+    t.after(() => window.close());
+    const table = document.querySelector('#grid-wrap table');
+    assert.equal(table.style.getPropertyValue('--csv-row-number-width'),
+      'max(44px, calc(1ch + 1.5em + 14px))', 'one-digit row numbers only reserve their own space and controls');
+    assert.equal(window.getComputedStyle(table.tHead.rows[0].cells[0]).minWidth, '0px',
+      'the blank corner must not inherit the minimum width for data headers');
+    assert.equal(table.querySelectorAll('col').length, 2);
+    assert.equal(table.querySelectorAll('col')[1].style.width, '200px');
+    assert.equal(table.style.width, 'calc(201px + var(--csv-row-number-width))');
+  }
+});
+
+test("row-number space follows the whole file count, not the current window or column count", (t) => {
+  const { window, document, send, scrollTo } = openGrid(csvText(99));
+  t.after(() => window.close());
+  const table = document.querySelector('#grid-wrap table');
+  const rowWidth = () => table.style.getPropertyValue('--csv-row-number-width');
+  assert.match(rowWidth(), /2ch/);
+  const group = table.querySelector('colgroup');
+  send({ type: 'setContent', text: csvText(1000), encodingLabel: 'UTF-8' });
+  assert.equal(table.querySelector('colgroup'), group, 'the same columns need no new colgroup');
+  assert.match(rowWidth(), /4ch/, 'a larger file reserves its largest row number before scrolling');
+  const width = rowWidth();
+  scrollTo(15000);
+  assert.equal(rowWidth(), width);
+  scrollTo(0);
+  assert.equal(rowWidth(), width);
+  send({ type: 'setContent', text: 'a,b,c\n1,2,3', encodingLabel: 'UTF-8' });
+  assert.match(rowWidth(), /1ch/, 'returning to a short file releases the excess space');
+  assert.deepEqual(Array.from(table.querySelectorAll('col')).slice(1).map(col => col.style.width),
+    ['200px', '200px', '200px']);
 });
 
 test("adding and removing columns preserves fixed data widths through header rebuilds", (t) => {
@@ -394,12 +430,12 @@ test("adding and removing columns preserves fixed data widths through header reb
   const table = document.querySelector('#grid-wrap table');
   document.getElementById("add-col").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.deepEqual(Array.from(table.querySelectorAll('col'), col => col.style.width),
-    ["80px", "200px", "200px", "200px", "200px"]);
-  assert.equal(table.style.width, '881px');
+    ["var(--csv-row-number-width)", "200px", "200px", "200px", "200px"]);
+  assert.equal(table.style.width, 'calc(801px + var(--csv-row-number-width))');
   document.querySelector('[data-delcol="1"]').click();
   assert.deepEqual(Array.from(table.querySelectorAll('col'), col => col.style.width),
-    ["80px", "200px", "200px", "200px"]);
-  assert.equal(table.style.width, '681px');
+    ["var(--csv-row-number-width)", "200px", "200px", "200px"]);
+  assert.equal(table.style.width, 'calc(601px + var(--csv-row-number-width))');
 });
 
 test("loading long content or a different column count keeps content-independent sizing", (t) => {
@@ -408,8 +444,8 @@ test("loading long content or a different column count keeps content-independent
   const table = document.querySelector('#grid-wrap table');
   send({ type: "setContent", text: 'name,path\n1,' + 'long-path/'.repeat(100), encodingLabel: "UTF-8" });
   assert.deepEqual(Array.from(table.querySelectorAll('col'), col => col.style.width),
-    ["80px", "200px", "200px"]);
-  assert.equal(table.style.width, '481px');
+    ["var(--csv-row-number-width)", "200px", "200px"]);
+  assert.equal(table.style.width, 'calc(401px + var(--csv-row-number-width))');
 });
 
 test("single-line paths expand on double-click without resizing columns or modifying saved data", async (t) => {
@@ -426,7 +462,7 @@ test("single-line paths expand on double-click without resizing columns or modif
   toggle();
   assert.equal(window.getComputedStyle(cell).whiteSpace, 'pre-wrap');
   assert.equal(window.getComputedStyle(cell).overflowWrap, 'anywhere', 'unbroken values must fit inside the column');
-  assert.equal(table.style.width, '681px');
+  assert.equal(table.style.width, 'calc(601px + var(--csv-row-number-width))');
   scrollTo(8000);
   scrollTo(0);
   cell = document.querySelector('td[data-r="1"][data-c="2"] .cell');
@@ -442,7 +478,7 @@ test("single-line paths expand on double-click without resizing columns or modif
   document.getElementById('filter').dispatchEvent(new window.Event('input', { bubbles: true }));
   await settleSearch();
   assert.equal(document.querySelectorAll('td.match').length, 1);
-  assert.equal(table.style.width, '681px');
+  assert.equal(table.style.width, 'calc(601px + var(--csv-row-number-width))');
 });
 
 test("read-only mode survives virtual window replacement without moving or rebuilding it on toggle", (t) => {

@@ -1180,8 +1180,8 @@ test("preview widths ignore page contents and single-line values wrap only on do
   const table = document.querySelector('table');
   const widths = () => Array.from(table.querySelectorAll('col'), col => col.style.width);
   assert.equal(table.style.tableLayout, 'fixed');
-  assert.equal(table.style.width, '481px');
-  assert.deepEqual(widths(), ['80px', '200px', '200px']);
+  assert.equal(table.style.width, 'calc(401px + var(--csv-row-number-width))');
+  assert.deepEqual(widths(), ['var(--csv-row-number-width)', '200px', '200px']);
   const cell = document.querySelector('#rows tr').cells[2];
   assert.equal(cell.childElementCount, 0, 'single-line values allocate no wrapper until expanded');
   click(cell);
@@ -1192,24 +1192,45 @@ test("preview widths ignore page contents and single-line values wrap only on do
   assert.equal(content.textContent, value);
   assert.equal(window.getComputedStyle(content).whiteSpace, 'pre-wrap');
   assert.equal(window.getComputedStyle(content).overflowWrap, 'anywhere');
-  assert.equal(table.style.width, '481px');
+  assert.equal(table.style.width, 'calc(401px + var(--csv-row-number-width))');
   cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
   assert.equal(window.getComputedStyle(content).whiteSpace, 'pre');
   assert.equal(content.textContent, value);
   await settle(window);
   assert.equal(postedMessages.length, count, 'expansion cannot request pages or searches');
   page('append', 2, 'short');
-  assert.deepEqual(widths(), ['80px', '200px', '200px']);
+  assert.deepEqual(widths(), ['var(--csv-row-number-width)', '200px', '200px']);
   page('replace', 3, 'even-longer/'.repeat(300));
-  assert.deepEqual(widths(), ['80px', '200px', '200px']);
-  assert.equal(table.style.width, '481px');
+  assert.deepEqual(widths(), ['var(--csv-row-number-width)', '200px', '200px']);
+  assert.equal(table.style.width, 'calc(401px + var(--csv-row-number-width))');
   assert.equal(document.querySelectorAll('.csv-expanded').length, 0);
   click(document.querySelector('#rows th.row-number'));
   assert.equal(document.querySelector('th.search-column'), null, 'row clicks must not scope search');
   send({ type: 'page', mode: 'replace', header: ['Name', 'Path', 'Size'],
     rows: [['image', 'short', '10']], startRow: 2, pageNumber: 1, done: true });
-  assert.deepEqual(widths(), ['80px', '200px', '200px', '200px']);
-  assert.equal(table.style.width, '681px');
+  assert.deepEqual(widths(), ['var(--csv-row-number-width)', '200px', '200px', '200px']);
+  assert.equal(table.style.width, 'calc(601px + var(--csv-row-number-width))');
+});
+
+test("preview row numbers reserve the whole indexed count while short previews stay compact", (t) => {
+  const { document, send, postedMessages } = openPreview(t);
+  const page = (startRow) => send({ type: 'page', mode: 'replace', header: ['Name'],
+    rows: [['value']], startRow, pageNumber: 1, done: true });
+  page(2);
+  const table = document.querySelector('table');
+  const rowWidth = () => table.style.getPropertyValue('--csv-row-number-width');
+  assert.match(rowWidth(), /1ch/);
+  assert.equal(table.querySelectorAll('col')[1].style.width, '200px');
+  const count = postedMessages.length;
+  send({ type: 'fileIndex', totalRows: 12345678, complete: true, indexedBytes: 1000, size: 1000 });
+  assert.match(rowWidth(), /8ch/, 'the finished count updates widths even when column count stays the same');
+  const width = rowWidth();
+  page(2);
+  assert.equal(rowWidth(), width, 'a page near the beginning must not shrink the reserved width');
+  page(12345678);
+  assert.equal(rowWidth(), width, 'distant rows use the same reserved width');
+  assert.equal(table.querySelectorAll('col')[1].style.width, '200px');
+  assert.equal(postedMessages.length, count, 'reserving row-number space starts no requests');
 });
 
 test("expanded preview rows affect absolute navigation and are discarded with their window", async (t) => {

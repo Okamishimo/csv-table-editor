@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.24] - 2026-11-12
+
+### Fixed
+
+- Keep the row-number column compact for short files, reserving space for the
+  file's largest row number and row controls instead of a fixed 80 pixels.
+
 ### Added
 
 - An **Editable / Read-only** toolbar switch for files in the editable grid.
