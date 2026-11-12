@@ -16,9 +16,25 @@ Documentation-only PRs use `Docs: description`, for example `Docs: clarify the r
 
 The allowlist covers `readme.md`, `changelog.md`, `AGENTS.md`, `CLAUDE.md`, `.github/release-rules.md`, Markdown under `docs/`, and `SKILL.md` or Markdown references in named skills under `.agents/skills/` and `.claude/skills/`. Source code, tests, scripts, workflows, manifests, lockfiles, hooks, configuration, and media require a Feature, Fix, or Release PR. Mixing any of them into a Docs PR fails, even if code is renamed into a Markdown path. Symlinks and executable files also fail. The local pre-commit hook continues to run full staged verification for every commit; only documentation PR CI uses quick checks.
 
+## Dependency updates
+
+[Dependabot configuration](../.github/dependabot.yml) checks npm packages and GitHub Actions Monday through Friday at 06:00 in `Asia/Tokyo`, grouping each ecosystem's version updates into at most one open PR against the default branch, `main`. Scheduled npm version updates include minor and patch versions; major npm upgrades are handled manually. Actions updates include major versions.
+
+Update PR titles start with `Fix:` to pass the existing PR policy. They run full verification, leave the extension's version unchanged, and wait for maintainer review and merge. A later Release PR publishes the accumulated changes. This configuration does not enable automatic merging or change repository security-update settings.
+
+Dependabot reads this file from the default branch, so a configuration change takes effect after it reaches `main`.
+
 ## Working locally
 
+Use Node 26 for development and verification, as the workflows do. The current jsdom requires a recent Node runtime, and Node 26 provides stable mock timers for warning-free tests. VSCE 4 and the current VS Code types are used together; the extension's declared minimum VS Code version matches the types.
+
 Install dependencies with `npm ci` after cloning. This also installs the tracked Git hooks; existing checkouts can use `npm run hooks:install`. Before each commit, the hook runs `npm run verify` on an isolated copy of the **staged** files using the checkout's installed dependencies. Unstaged fixes cannot hide failures in the commit. If the build changes the staged vendor distribution, run `npm run build` and stage the generated change before retrying. The working tree and index are left intact. Keep installed dependencies current with `npm ci`.
+
+Install and build also apply `scripts/patch-dependencies.js`, a targeted compatibility fix for jsdom 31's CSS number serialization: CSSOM limits decimal places, while jsdom rounds significant digits and loses whole pixels from large preview spacers. The patch preserves those integers, recognizes its already-patched form, and fails if the upstream anchor changes. It leaves the preview and its existing exact-height tests unchanged. Remove the fix when upstream preserves those values itself. The npm script allowlist permits VSCE's signing-helper installer to copy its platform binary from the installed optional dependency.
+
+The scoped npm override upgrades VSCE's minimatch dependency from major 10 to the fixed major 11 for GHSA-g3hv-75wg-m249. Remove the override when VSCE itself requires a fixed version; package file listing is checked against the new matcher.
+
+`npm run verify` runs build, tests, and patch idempotency with Node process warnings treated as errors in each step and its child processes. A warning therefore fails verification and blocks the pre-commit hook or full CI check. Running `npm run build` or `npm test` alone retains their normal warning behavior.
 
 ```sh
 git switch -c release/0.0.16

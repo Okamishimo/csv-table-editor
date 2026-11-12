@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Fail `npm run verify`, including pre-commit and full CI checks, on Node
+  process warnings from build, syntax checks, tests, and their child processes.
+- Configure weekday grouped Dependabot version updates for npm packages and
+  GitHub Actions through `Fix:` PRs into `main`, leaving major npm upgrades
+  for manual updates.
+- Upgrade all direct npm dependencies to their latest stable versions,
+  including TypeScript 7, jsdom 31, VSCE 4, webpack-cli 7, and yazl 3.
+- Upgrade checkout/setup-node Actions to v7 and use Node 26 for CI.
+- Require VS Code 1.146 or later to match the upgraded VS Code types and
+  VSCE's manifest validation.
+- Preserve exact large-preview spacer heights with a targeted jsdom CSS
+  serialization compatibility fix, without changing the existing tests.
+- Override VSCE's minimatch dependency with the patched major 11 release.
+
 ## [0.0.24] - 2026-11-12
 
 ### Fixed

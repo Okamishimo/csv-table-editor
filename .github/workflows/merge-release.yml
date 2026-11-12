@@ -24,14 +24,14 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       # Only merged, trusted code is checked out; never the unmerged PR head.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Skip documentation publication or tag the merged release
         id: tag
         env:

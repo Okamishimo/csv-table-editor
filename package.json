@@ -33,7 +33,7 @@
 		"utf-16"
 	],
 	"engines": {
-		"vscode": "^1.85.0"
+		"vscode": "^1.146.0"
 	},
 	"main": "./dist/extension.js",
 	"activationEvents": [
@@ -103,7 +103,7 @@
 		]
 	},
 	"scripts": {
-		"prepare": "node scripts/install-hooks.js",
+		"prepare": "node scripts/patch-dependencies.js && node scripts/install-hooks.js",
 		"hooks:install": "node scripts/install-hooks.js",
 		"precommit": "node scripts/pre-commit.js",
 		"vscode:prepublish": "npm run build",
@@ -111,24 +111,33 @@
 		"watch": "webpack --watch",
 		"package": "npm run verify",
 		"lint": "eslint src --ext ts",
+		"patch:deps": "node scripts/patch-dependencies.js",
 		"patch:dist": "node scripts/patch-distribution.js",
 		"test": "node --test test/*.test.js",
-		"build": "npm run patch:dist && node scripts/check-syntax.js",
-		"verify": "npm run build && npm test && node scripts/verify-patch-idempotency.js"
+		"build": "npm run patch:deps && npm run patch:dist && node scripts/check-syntax.js",
+		"verify": "node scripts/verify.js"
 	},
 	"dependencies": {
-		"iconv-lite": "^0.6.3"
+		"iconv-lite": "^0.7.3"
 	},
 	"devDependencies": {
-		"@types/node": "^20.11.0",
-		"@types/vscode": "^1.85.0",
-		"@vscode/vsce": "^3.9.2",
-		"jsdom": "^30.0.1",
-		"ts-loader": "^9.5.1",
-		"typescript": "^5.3.3",
-		"webpack": "^5.90.0",
-		"webpack-cli": "^5.1.4",
+		"@types/node": "^26.6.6",
+		"@types/vscode": "^1.146.0",
+		"@vscode/vsce": "^4.1.0",
+		"jsdom": "^31.0.0",
+		"ts-loader": "^9.6.2",
+		"typescript": "^7.0.2",
+		"webpack": "^5.112.2",
+		"webpack-cli": "^7.3.1",
 		"yauzl": "^3.4.0",
-		"yazl": "^2.5.1"
+		"yazl": "^3.3.1"
+	},
+	"allowScripts": {
+		"@vscode/vsce-sign": true
+	},
+	"overrides": {
+		"@vscode/vsce": {
+			"minimatch": "^11.0.8"
+		}
 	}
 }
