@@ -54,8 +54,15 @@ jobs:
           cache: npm
       - run: npm ci
         if: needs.policy.outputs.kind != 'docs'
-      - run: npm run verify
+      - name: Build
         if: needs.policy.outputs.kind != 'docs'
+        run: npm run verify -- --step build
+      - name: Tests
+        if: needs.policy.outputs.kind != 'docs'
+        run: npm run verify -- --step test
+      - name: Patch idempotency
+        if: needs.policy.outputs.kind != 'docs'
+        run: npm run verify -- --step idempotency
       - name: Require generated distribution changes to be committed
         if: needs.policy.outputs.kind != 'docs'
         run: git diff --exit-code

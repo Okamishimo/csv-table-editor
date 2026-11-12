@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve exact large-preview spacer heights with a targeted jsdom CSS
   serialization compatibility fix, without changing the existing tests.
 - Override VSCE's minimatch dependency with the patched major 11 release.
+- Show build, tests, and patch idempotency as separate PR CI steps while
+  retaining the shared verification commands and warning handling.
 
 ## [0.0.24] - 2026-11-12
 
