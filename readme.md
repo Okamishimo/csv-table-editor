@@ -61,7 +61,7 @@ Auto-detects BOM-marked files first, then checks BOM-less UTF-16, strict UTF-8 a
 
 ## Requirements
 
-No additional setup. Encoding conversion is handled by the bundled [`iconv-lite`](https://www.npmjs.com/package/iconv-lite) library.
+Requires VS Code 1.146 or later. No additional setup. Encoding conversion is handled by the bundled [`iconv-lite`](https://www.npmjs.com/package/iconv-lite) library.
 
 The editable grid is an in-memory editor. Local files larger than 64 MiB open in a streaming, read-only preview instead, which reads the whole file before you browse it and then lets you scroll and search all of it. See [large files](docs/large-files.md) for what that preview can and cannot do.
 

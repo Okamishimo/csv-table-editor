@@ -61,7 +61,7 @@
 
 ## 系統需求
 
-不需要額外設定。編碼轉換由內建的 [`iconv-lite`](https://www.npmjs.com/package/iconv-lite) 函式庫處理。
+需要 VS Code 1.146 或更新版本，不需要額外設定。編碼轉換由內建的 [`iconv-lite`](https://www.npmjs.com/package/iconv-lite) 函式庫處理。
 
 可編輯格線是記憶體內的編輯器。超過 64 MiB 的本機檔案會改以串流唯讀預覽開啟；預覽會先把整個檔案讀過一遍，之後就能捲動與搜尋整個檔案。預覽能做到什麼、不能做到什麼，請見[大型檔案](large-files.md)。
 
