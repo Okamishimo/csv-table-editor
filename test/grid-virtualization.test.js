@@ -369,51 +369,80 @@ test("an edited cell that stays in the window keeps focus and is not committed t
     "an untouched cell must not create an undo entry");
 });
 
-test("column widths are pinned so scrolling cannot resize the table", () => {
+test("column widths ignore content and scrolling, with an explicit fixed table width", (t) => {
   const total = 5000;
-  // Column 2 is the widest; only its width should be pinned, whatever rows the
-  // window happens to hold.
+  // Deliberately different natural sizes must never determine the widths.
   const widths = (index) => [44, 90, 120, 260][index] || 80;
-  const { document, scrollTo } = openGrid(csvText(total), { headerWidths: widths });
+  const { window, document, scrollTo } = openGrid(csvText(total), { headerWidths: widths });
+  t.after(() => window.close());
   const table = document.querySelector("#grid-wrap table");
-  const headerCells = () => Array.from(document.querySelector("thead").rows[0].cells);
+  const columnWidths = () => Array.from(table.querySelectorAll('col'), col => col.style.width);
 
   assert.equal(table.style.tableLayout, "fixed");
-  assert.deepEqual(headerCells().map((cell) => cell.style.width),
-    ["44px", "90px", "120px", "260px"]);
+  assert.equal(table.style.width, '681px', 'fixed layout needs a definite total width');
+  assert.equal(window.getComputedStyle(table).minWidth, '0px');
+  assert.deepEqual(columnWidths(), ["80px", "200px", "200px", "200px"]);
 
   scrollTo(80000);
-  assert.deepEqual(headerCells().map((cell) => cell.style.width),
-    ["44px", "90px", "120px", "260px"], "a window change must not resize the columns");
+  assert.deepEqual(columnWidths(), ["80px", "200px", "200px", "200px"]);
+  assert.equal(table.style.width, '681px');
 });
 
-test("adding a column re-measures the pinned widths", () => {
-  let natural = (index) => [44, 90, 120, 260][index] || 80;
-  const { window, document } = openGrid(csvText(400), { headerWidths: (index) => natural(index) });
-  assert.deepEqual(Array.from(document.querySelector("thead").rows[0].cells)
-    .map((cell) => cell.style.width), ["44px", "90px", "120px", "260px"]);
-
-  natural = (index) => [44, 70, 70, 70, 70][index] || 80;
+test("adding and removing columns preserves fixed data widths through header rebuilds", (t) => {
+  const { window, document } = openGrid(csvText(400));
+  t.after(() => window.close());
+  const table = document.querySelector('#grid-wrap table');
   document.getElementById("add-col").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-  assert.deepEqual(Array.from(document.querySelector("thead").rows[0].cells)
-    .map((cell) => cell.style.width), ["44px", "70px", "70px", "70px", "70px"],
-    "a new column count must be measured afresh, not read back from the pinned layout");
+  assert.deepEqual(Array.from(table.querySelectorAll('col'), col => col.style.width),
+    ["80px", "200px", "200px", "200px", "200px"]);
+  assert.equal(table.style.width, '881px');
+  document.querySelector('[data-delcol="1"]').click();
+  assert.deepEqual(Array.from(table.querySelectorAll('col'), col => col.style.width),
+    ["80px", "200px", "200px", "200px"]);
+  assert.equal(table.style.width, '681px');
 });
 
-test("loading different content measures its own column widths", () => {
-  let natural = (index) => [44, 90, 120, 260][index] || 80;
-  const { document, send } = openGrid(csvText(400), { headerWidths: (index) => natural(index) });
-  assert.equal(document.querySelector("thead").rows[0].cells[3].style.width, "260px");
-
-  natural = (index) => [44, 50, 60, 70][index] || 80;
-  send({ type: "setContent", text: "a,b,c\n1,2,3", encodingLabel: "UTF-8" });
-  assert.deepEqual(Array.from(document.querySelector("thead").rows[0].cells)
-    .map((cell) => cell.style.width), ["44px", "50px", "60px", "70px"]);
+test("loading long content or a different column count keeps content-independent sizing", (t) => {
+  const { window, document, send } = openGrid(csvText(400));
+  t.after(() => window.close());
+  const table = document.querySelector('#grid-wrap table');
+  send({ type: "setContent", text: 'name,path\n1,' + 'long-path/'.repeat(100), encodingLabel: "UTF-8" });
+  assert.deepEqual(Array.from(table.querySelectorAll('col'), col => col.style.width),
+    ["80px", "200px", "200px"]);
+  assert.equal(table.style.width, '481px');
 });
 
-test("without measurable layout the table keeps automatic column sizing", () => {
-  const { document } = openGrid(csvText(400));
-  assert.equal(document.querySelector("#grid-wrap table").style.tableLayout, "");
+test("single-line paths expand on double-click without resizing columns or modifying saved data", async (t) => {
+  const value = 'D:\\Inetpub\\' + 'variable-length-folder\\'.repeat(15) + 'image.png';
+  const { window, document, scrollTo, send, postedMessages } = openGrid(
+    csvText(500).replace('name1,plain', 'name1,' + value));
+  t.after(() => window.close());
+  const table = document.querySelector('#grid-wrap table');
+  let cell = document.querySelector('td[data-r="1"][data-c="2"] .cell');
+  const toggle = () => cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+  cell.focus();
+  assert.equal(cell.classList.contains('csv-expanded'), false);
+  assert.equal(window.getComputedStyle(cell).whiteSpace, 'pre');
+  toggle();
+  assert.equal(window.getComputedStyle(cell).whiteSpace, 'pre-wrap');
+  assert.equal(window.getComputedStyle(cell).overflowWrap, 'anywhere', 'unbroken values must fit inside the column');
+  assert.equal(table.style.width, '681px');
+  scrollTo(8000);
+  scrollTo(0);
+  cell = document.querySelector('td[data-r="1"][data-c="2"] .cell');
+  assert.ok(cell.classList.contains('csv-expanded'));
+  toggle();
+  assert.equal(window.getComputedStyle(cell).whiteSpace, 'pre');
+  send({ type: 'requestGridData', requestId: 456 });
+  assert.equal(postedMessages.find(message => message.requestId === 456).grid[1][2], value);
+  assert.equal(postedMessages.filter(message => message.type === 'edit').length, 0);
+  document.querySelector('th[data-rowhead="1"]').click();
+  assert.match(document.getElementById('filter').title, /whole table/, 'row clicks must not scope search');
+  document.getElementById('filter').value = 'image.png';
+  document.getElementById('filter').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settleSearch();
+  assert.equal(document.querySelectorAll('td.match').length, 1);
+  assert.equal(table.style.width, '681px');
 });
 
 test("read-only mode survives virtual window replacement without moving or rebuilding it on toggle", (t) => {

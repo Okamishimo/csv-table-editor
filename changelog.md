@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Keep columns at a fixed 200-pixel width in both the editable grid and the
+  large-file preview, independent of content and scrolling. Double-clicking a
+  cell wraps and expands long single-line text as well as multiline text
+  without changing the column width; double-click again to collapse it.
 - Remove the update authentication cleanup command. Only **Check for Extension
   Updates** remains in the Command Palette for updates.
 

@@ -13,6 +13,7 @@ const {
 } = require("./font-settings");
 const { buildFileIndex } = require("./large-file-index");
 const multiline = require("./multiline-cells");
+const { applyFixedColumnLayout } = require("./column-layout");
 
 const MIB = 1024 * 1024;
 const SAMPLE_BYTES = 256 * 1024;
@@ -916,7 +917,7 @@ function getLargeFileWebviewHtml() {
   #preparing[hidden] { display: none; }
   #preparing-bar { width: 240px; height: 6px; overflow: hidden; border: 1px solid var(--vscode-panel-border); border-radius: 3px; background: var(--vscode-editorWidget-background); }
   #preparing-fill { height: 100%; width: 0; background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); }
-  table { border-collapse: collapse; min-width: 100%; white-space: nowrap; }
+  table { border-collapse: collapse; white-space: nowrap; }
   th, td { border: 1px solid var(--vscode-panel-border); padding: 3px 7px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
   ${multiline.previewCss}
   thead { position: sticky; top: 0; z-index: 2; background: var(--vscode-editorWidget-background); }
@@ -999,6 +1000,7 @@ function getLargeFileWebviewHtml() {
    */
   const scroller = { top: 0, height: 0, base: 0, below: 0, rest: 0 };
   ${multiline.createRowLayout.toString()}
+  ${applyFixedColumnLayout.toString()}
   const expandedLayout = createRowLayout();
   const expandedRows = new Set();
   /** While a scan runs the view follows it, until the reader takes over. */
@@ -1213,8 +1215,16 @@ function getLargeFileWebviewHtml() {
 
   byId('rows').addEventListener('dblclick', event => {
     const cell = event.target.closest('td');
-    const content = cell && cell.querySelector('.csv-multiline');
-    if (!content) return;
+    if (!cell) return;
+    let content = cell.querySelector('.csv-multiline');
+    if (!content) {
+      // Single-line values get a wrapper only when expanded, avoiding an
+      // extra element in every cell of a 500-row by 100-column window.
+      content = document.createElement('div');
+      content.className = 'csv-multiline';
+      content.textContent = cell.textContent;
+      cell.replaceChildren(content);
+    }
     event.preventDefault();
     stopFollowing();
     const row = cell.parentElement;
@@ -1283,6 +1293,11 @@ function getLargeFileWebviewHtml() {
         - (head.getBoundingClientRect().height || 0) - scrollerOffsetOf(keeping.row);
     }
     const scrollLeft = tableWrap.scrollLeft;
+    const table = head.parentElement;
+    let columns = page.header.length;
+    for (const row of page.rows) columns = Math.max(columns, row.length);
+    if (!replacing) columns = Math.max(columns, (table.querySelector('colgroup')?.children.length || 1) - 1);
+    applyFixedColumnLayout(table, columns);
     if (replacing || !head.firstChild) {
       head.replaceChildren();
       const headerRow = document.createElement('tr');
