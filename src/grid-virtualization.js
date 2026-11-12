@@ -29,6 +29,7 @@ const MARKER = "function csvWindowRange()";
 const OVERSCAN_ROWS = 10;
 const ESTIMATED_ROW_HEIGHT = 26;
 const multiline = require("./multiline-cells");
+const { applyFixedColumnLayout } = require("./column-layout");
 
 function replaceOnce(source, from, to, description) {
   const occurrences = source.split(from).length - 1;
@@ -53,6 +54,9 @@ function decorateWebviewHtml(html) {
       "  /* overflow-anchor: the browser would otherwise try to compensate for the",
       "     rows this grid swaps in and out, fighting the spacer arithmetic. */",
       "  #grid-wrap { overflow: auto; overflow-anchor: none; height: calc(100vh - 37px); }",
+      "  #grid-wrap table { min-width: 0; }",
+      "  #grid-wrap thead th { overflow: hidden; text-overflow: ellipsis; }",
+      "  #grid-wrap thead th:first-child { min-width: 0; }",
       "  /* Stand-ins for the rows outside the rendered window. Their height is",
       "     set through the CSSOM, which the style-src nonce policy allows. */",
       "  tr.csv-spacer td { padding: 0; border: 0; min-width: 0; height: 0; }",
@@ -88,39 +92,11 @@ function decorateWebviewHtml(html) {
       "  let csvMatchColumns = new Map();",
       "  /** The cell that held focus when the window was last rebuilt. */",
       "  let csvFocusedCell = null;",
-      "  /** Column widths measured once from the first window. Automatic table",
-      "   *  layout sizes columns from the rows it can see, so without this the",
-      "   *  whole table would resize every time scrolling swapped the rows. */",
-      "  let csvColumnWidths = null;",
+      applyFixedColumnLayout.toString(),
       multiline.createRowLayout.toString(),
       multiline.readEditableCell.toString(),
       multiline.installEditableMultiline.toString(),
       "  const csvMultiline = installEditableMultiline();",
-      "",
-      "  function lockCsvColumnWidths() {",
-      "    const headerRowEl = theadEl.rows[0];",
-      "    if (!headerRowEl || !headerRowEl.cells.length) { return; }",
-      "    const cells = headerRowEl.cells;",
-      "    if (!csvColumnWidths || csvColumnWidths.length !== cells.length) {",
-      "      // Measure the natural layout before pinning it, so a re-measure after",
-      "      // a column is added or removed does not just read back the old widths.",
-      "      csvTableEl.style.tableLayout = '';",
-      "      const widths = [];",
-      "      let measured = false;",
-      "      for (let i = 0; i < cells.length; i++) {",
-      "        const width = cells[i].getBoundingClientRect().width;",
-      "        if (width > 0) { measured = true; }",
-      "        widths.push(width);",
-      "      }",
-      "      // Without layout there is nothing to pin; leave the table automatic.",
-      "      if (!measured) { return; }",
-      "      csvColumnWidths = widths;",
-      "    }",
-      "    for (let i = 0; i < cells.length; i++) {",
-      "      cells[i].style.width = csvColumnWidths[i] + 'px';",
-      "    }",
-      "    csvTableEl.style.tableLayout = 'fixed';",
-      "  }",
       "",
       "  function rebuildCsvDisplayOrder() {",
       "    csvMultiline.reset();",
@@ -301,37 +277,12 @@ function decorateWebviewHtml(html) {
       "    // tbody: only the rows near the viewport, with two spacer rows standing",
       "    // in for the rest so the scrollbar still measures the whole file.",
       "    csvRenderedColumns = cols;",
+      "    applyFixedColumnLayout(csvTableEl, cols, grid.length);",
       "    rebuildCsvDisplayOrder();",
       "    paintCsvWindowMeasured(csvWindowRange());",
-      "    // render() rebuilt thead, so the pinned widths have to go back on.",
-      "    lockCsvColumnWidths();",
       "",
     ].join("\n"),
     "tbody build"
-  );
-
-  // ---- 3b. A new file is measured afresh ----------------------------------
-  decorated = replaceOnce(
-    decorated,
-    [
-      "  function loadNewGrid() {",
-      "    headerRow = guessHeaderRow(grid);",
-      "    sortState = { col: -1, dir: null };",
-      "    rebuildViewOrder();",
-      "    render();",
-      "  }",
-    ].join("\n"),
-    [
-      "  function loadNewGrid() {",
-      "    headerRow = guessHeaderRow(grid);",
-      "    sortState = { col: -1, dir: null };",
-      "    // Different content deserves its own column widths.",
-      "    csvColumnWidths = null;",
-      "    rebuildViewOrder();",
-      "    render();",
-      "  }",
-    ].join("\n"),
-    "new grid loader"
   );
 
   // ---- 4. Match highlighting proportional to the window --------------------

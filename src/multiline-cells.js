@@ -53,17 +53,17 @@ function createRowLayout() {
 
 const editableCss = `
   /* Reserve the same one-and-a-half-line slot for every collapsed row, so
-     unseen rows have a known height. Only actual line breaks are shown. */
+     unseen rows have a known height. Text wraps only on explicit expansion. */
   #grid-wrap tbody tr:not(.csv-spacer) > td { vertical-align: top; padding: 3px 6px; }
   #grid-wrap td .cell { box-sizing: content-box; width: auto; padding: 0; height: 2.1em; line-height: 1.4; white-space: pre; overflow: hidden; }
-  #grid-wrap td .cell.csv-expanded { height: auto; min-height: 2.1em; }
+  #grid-wrap td .cell.csv-expanded { height: auto; min-height: 2.1em; white-space: pre-wrap; overflow-wrap: anywhere; }
   #grid-wrap .csv-measuring td .cell.csv-expanded { height: 2.1em; min-height: 0; }
 `;
 
 const previewCss = `
   #rows td { height: var(--csv-preview-row-height, calc(2.1em + 7px)); line-height: 1.4; vertical-align: top; }
   .csv-multiline { height: 2.1em; white-space: pre; overflow: hidden; }
-  .csv-multiline.csv-expanded { height: auto; min-height: 2.1em; }
+  .csv-multiline.csv-expanded { height: auto; min-height: 2.1em; white-space: pre-wrap; overflow-wrap: anywhere; }
   .csv-measuring .csv-multiline.csv-expanded { height: 2.1em; min-height: 0; }
 `;
 
@@ -102,7 +102,7 @@ function installEditableMultiline() {
   tbodyEl.addEventListener('dblclick', (event) => {
     const td = event.target.closest('td[data-r][data-c]');
     const cell = td?.querySelector('.cell');
-    if (!cell || (!cell.classList.contains('csv-expanded') && !/[\r\n]/.test(cell.innerText || cell.textContent))) return;
+    if (!cell) return;
     event.preventDefault();
     const r = +td.dataset.r, c = +td.dataset.c;
     const open = cell.classList.toggle('csv-expanded');

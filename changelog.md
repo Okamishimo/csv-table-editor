@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.24] - 2026-11-12
+
+### Fixed
+
+- Keep the row-number column compact for short files, reserving space for the
+  file's largest row number and row controls instead of a fixed 80 pixels.
+
 ### Added
 
 - An **Editable / Read-only** toolbar switch for files in the editable grid.
@@ -17,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Keep columns at a fixed 200-pixel width in both the editable grid and the
+  large-file preview, independent of content and scrolling. Double-clicking a
+  cell wraps and expands long single-line text as well as multiline text
+  without changing the column width; double-click again to collapse it.
 - Remove the update authentication cleanup command. Only **Check for Extension
   Updates** remains in the Command Palette for updates.
 
