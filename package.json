@@ -70,12 +70,6 @@
 					"maximum": 168,
 					"scope": "application",
 					"description": "Hours between automatic update checks. Failed attempts also respect this interval."
-				},
-				"csvTableEditor.updates.profileName": {
-					"type": "string",
-					"default": "",
-					"scope": "machine",
-					"description": "Exact VS Code profile name for CLI updates when using a named profile. Leave empty for the default profile."
 				}
 			}
 		},

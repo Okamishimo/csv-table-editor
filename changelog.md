@@ -8,8 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Install GitHub Release VSIX updates through VS Code's documented built-in
+  command on macOS and Windows, avoiding executable-path errors such as
+  `ENOENT` for `<commit>\Code.exe` on Windows with versioned resources.
+
 ### Changed
 
+- Let VS Code handle the current update profile and remove the CLI-only
+  `csvTableEditor.updates.profileName` setting.
 - Fail `npm run verify`, including pre-commit and full CI checks, on Node
   process warnings from build, syntax checks, tests, and their child processes.
 - Configure weekday grouped Dependabot version updates for npm packages and
