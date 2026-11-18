@@ -158,8 +158,8 @@ Topic branch -> staged verification -> commit -> push
   deployed. Local files or passing unit tests do not prove a successful Actions run.
 - Never overwrite release tags or assets. Follow AGENTS.md's GitHub Actions
   Publication and Recovery section for retries, complete drafts, and partial uploads.
-- Do not create a local VSIX unless packaging was requested. Once configured,
-  merging a release PR triggers packaging and publication through the workflow.
+- Packaging runs on GitHub Actions after a Release PR merges. Create a local
+  VSIX only when the user explicitly requests a local artifact.
 
 ## Server protection and known limits
 
