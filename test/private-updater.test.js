@@ -9,7 +9,7 @@ const test = require("node:test");
 const { ZipFile } = require("yazl");
 const { createUpdater, acquireLock, readState, writeState } = require("../src/private-updater");
 const { isNewer, selectRelease, parseChecksum, verifyVsixManifest, UpdateError } = require("../src/update-artifact");
-const { cliInvocation, installVsix } = require("../src/update-installer");
+const { installVsix } = require("../src/update-installer");
 const { releaseInfo, ensureAssetsAvailable } = require("../scripts/private-release");
 
 async function zipManifest(manifest, name = "extension/package.json") {
@@ -56,6 +56,7 @@ async function harness(t, overrides = {}) {
   };
   const vscode = {
     ExtensionKind: { UI: 1, Workspace: 2 }, ExtensionMode: { Production: 1 }, env: {},
+    Uri: { file: (fsPath) => ({ scheme: "file", fsPath }) },
     workspace: { getConfiguration: () => ({ get: (key, fallback) => config[key] ?? fallback }) },
     authentication: { getSession: async (...args) => { authCalls.push(args); return { accessToken: "managed-session" }; } },
     commands: { executeCommand: async (command) => executed.push(command) },
@@ -253,59 +254,98 @@ test("disabled, remote and development hosts skip automatic update work", async 
   assert.equal(h.calls.latest, 0);
 });
 
-test("macOS/Windows CLI uses this app, separated arguments and correct user/extension directories", () => {
+test("macOS/Windows installation passes a VSIX URI to the official command without CLI or profile lookup", async () => {
   for (const platform of ["darwin", "win32"]) {
-    const root = platform === "darwin" ? "/Applications/Visual Studio Code.app/Contents/Resources/app" : "C:\\Program Files\\Microsoft VS Code\\resources\\app";
-    const paths = platform === "darwin" ? path.posix : path.win32;
-    const user = platform === "darwin" ? "/Users/name/Library/Application Support/Code" : "C:\\Users\\name\\AppData\\Roaming\\Code";
-    const extensions = platform === "darwin" ? "/Users/name/.vscode/extensions" : "C:\\Users\\name\\.vscode\\extensions";
-    const context = { extension: { extensionKind: 2 }, globalStorageUri: { fsPath: paths.join(user, "User/globalStorage/okamishimo.csv-table-editor") },
-      extensionUri: { fsPath: paths.join(extensions, "okamishimo.csv-table-editor-0.0.10") } };
-    const vscode = { env: { appRoot: root }, workspace: { getConfiguration: () => ({ get: () => "" }) }, ExtensionKind: { UI: 1 } };
-    const file = paths.join(user, "spaces & symbols", "update.vsix");
-    const result = cliInvocation(vscode, context, file, { nameShort: "Code" }, platform, { NODE_OPTIONS: "unsafe", VSCODE_IPC_HOOK_CLI: "remote" });
-    assert.equal(result.executable, platform === "darwin" ? "/Applications/Visual Studio Code.app/Contents/MacOS/Code" : "C:\\Program Files\\Microsoft VS Code\\Code.exe");
-    assert.deepEqual(result.args, [paths.join(root, "out/cli.js"), "--install-extension", file, "--force", "--user-data-dir", user, "--extensions-dir", extensions]);
-    assert.equal(result.options.shell, false);
-    assert.equal(result.options.env.ELECTRON_RUN_AS_NODE, "1");
-    assert.equal(result.options.env.NODE_OPTIONS, undefined);
-    assert.equal(result.options.env.VSCODE_IPC_HOOK_CLI, undefined);
-    context.globalStorageUri.fsPath = paths.join(user, "User/profiles/abc/globalStorage/okamishimo.csv-table-editor");
-    assert.throws(() => cliInvocation(vscode, context, file, { nameShort: "Code" }, platform), /profileName/);
-    vscode.workspace.getConfiguration = () => ({ get: () => "Personal Profile" });
-    assert.deepEqual(cliInvocation(vscode, context, file, { nameShort: "Code" }, platform).args.slice(-2), ["--profile", "Personal Profile"]);
+    const file = platform === "darwin" ? "/Users/name/updates & files/更新.vsix" : "c:\\Users\\AIRCh\\updates & files\\更新.vsix";
+    for (const profile of ["User", "User/profiles/abc"]) {
+      const uri = { scheme: "file", fsPath: file };
+      const calls = [];
+      const vscode = {
+        env: { get appRoot() { throw new Error("must not locate the executable or product.json"); } },
+        ExtensionKind: { UI: 1 }, ExtensionMode: { Production: 1 },
+        workspace: { getConfiguration() { throw new Error("must not require a profile name"); } },
+        Uri: { file: (value) => { assert.equal(value, file); return uri; } },
+        commands: { executeCommand: async (...args) => { calls.push(args); } },
+      };
+      const context = { extension: { extensionKind: 2 }, extensionMode: 1,
+        globalStorageUri: { fsPath: `${profile}/globalStorage/editor` } };
+      await installVsix(vscode, context, file, platform);
+      assert.deepEqual(calls, [["workbench.extensions.installExtension", uri]]);
+      assert.equal(calls[0][1], uri, "a path string would be interpreted as a Marketplace extension ID");
+    }
   }
 });
 
-async function failingInstaller(h, error) {
-  const appRoot = path.join(h.directory, "Code.app", "Contents", "Resources", "app");
-  await fs.mkdir(path.join(appRoot, "out"), { recursive: true });
-  await fs.writeFile(path.join(appRoot, "product.json"), JSON.stringify({ nameShort: "Code" }));
-  const vscode = { ...h.vscode, env: { appRoot } };
-  const context = { ...h.context, globalStorageUri: { fsPath: path.join(h.directory, "User", "globalStorage", "editor") } };
-  const invocation = cliInvocation(vscode, context, "unused", { nameShort: "Code" }, "darwin");
-  await fs.mkdir(path.dirname(invocation.executable), { recursive: true });
-  await fs.writeFile(invocation.executable, "");
-  await fs.writeFile(invocation.args[0], "");
-  return (file) => installVsix(vscode, context, file, async () => { throw error; }, "darwin");
-}
+test("built-in installation retains the local production macOS/Windows guards", async () => {
+  for (const { platform = "darwin", remoteName, extensionMode = 1 } of [
+    { platform: "linux" }, { remoteName: "ssh-remote" }, { remoteName: "wsl" },
+    { extensionMode: 2 }, { extensionMode: 3 },
+  ]) {
+    const vscode = { env: { remoteName }, ExtensionKind: { UI: 1 }, ExtensionMode: { Production: 1 },
+      commands: { executeCommand() { assert.fail("unsupported hosts must not install"); } } };
+    const context = { extension: { extensionKind: 2 }, extensionMode };
+    await assert.rejects(installVsix(vscode, context, "unused.vsix", platform), /installed, local macOS and Windows/);
+  }
+});
 
-test("installer reports CLI diagnostics, exit status and launch errors without exposing credentials", async (t) => {
+test("built-in installation waits for completion before marking success, cleaning up and offering Reload", async (t) => {
+  for (const platform of ["darwin", "win32"]) {
+    const h = await harness(t);
+    let entered;
+    let finish;
+    let vsix;
+    const started = new Promise((resolve) => { entered = resolve; });
+    const held = new Promise((resolve) => { finish = resolve; });
+    const calls = [];
+    h.vscode.commands.executeCommand = async (command, uri) => {
+      calls.push(command);
+      vsix = uri.fsPath;
+      entered();
+      assert.equal(command, "workbench.extensions.installExtension");
+      assert.equal(uri.scheme, "file");
+      assert.deepEqual(await fs.readFile(vsix), h.payload);
+      await held;
+    };
+    const dependencies = { ...h.dependencies, install: undefined, platform };
+    const updater = createUpdater(h.context, h.vscode, dependencies);
+    const other = createUpdater(h.context, h.vscode, dependencies);
+    t.after(() => { updater.dispose(); other.dispose(); });
+    const pending = updater.check(true);
+    await started;
+    try {
+      assert.equal((await readState(h.stateDirectory)).installedVersion, undefined);
+      await fs.access(vsix);
+      assert.equal(h.messages.length, 0, "no reload prompt while installation is pending");
+      await other.check(true);
+      assert.match(h.messages[0].message, /Another VS Code/);
+      assert.deepEqual(calls, ["workbench.extensions.installExtension"]);
+    } finally {
+      finish();
+      await pending;
+    }
+    assert.equal((await readState(h.stateDirectory)).installedVersion, "0.0.11");
+    assert.deepEqual(await fs.readdir(h.stateDirectory), ["state.json"]);
+    assert.deepEqual(h.messages.at(-1).actions, ["Reload Window", "Later"]);
+    assert.match(h.logs.join("\n"), /built-in extension installation command/);
+    await updater.check();
+    assert.equal(calls.length, 1, "a completed installation must not be repeated");
+  }
+});
+
+test("installer reports command errors and cancellation without exposing credentials", async (t) => {
   const cases = [
-    { error: Object.assign(new Error("Command failed: internal invocation"), {
-      code: 1, stderr: "Warning: installation failed", stdout: "Extension requires VS Code 1.100 or newer.",
-    }), expected: /code 1.*\nWarning: installation failed\nExtension requires VS Code 1.100 or newer/, absent: /internal invocation/ },
-    { error: Object.assign(new Error("spawn Code EACCES"), { code: "EACCES" }), expected: /EACCES.*\nspawn Code EACCES/ },
-    { error: Object.assign(new Error("Command failed"), { code: null, killed: true, signal: "SIGTERM", stderr: "Installation interrupted" }),
-      expected: /SIGTERM.*timeout or cancellation.*\nInstallation interrupted/, absent: /code null|code ,/ },
-    { error: Object.assign(new Error("Command failed"), { stderr: "\u001b[31mPermission denied\u001b[0m\nAuthorization: Bearer secret-value\nhttps://example.com/file?signature=private-value\ntoken=other-secret github_pat_abcdef ghp_abcdef" }),
+    { error: new Error("Extension requires VS Code 1.100 or newer."), expected: /installation failed\.\nExtension requires VS Code 1.100 or newer/ },
+    { error: new Error("command 'workbench.extensions.installExtension' not found"), expected: /installExtension.*not found/ },
+    { error: Object.assign(new Error("Installation cancelled"), { code: "Canceled" }), expected: /code Canceled.*\nInstallation cancelled/ },
+    { error: new Error("\u001b[31mPermission denied\u001b[0m\nAuthorization: Bearer secret-value\nhttps://example.com/file?signature=private-value\ntoken=other-secret github_pat_abcdef ghp_abcdef"),
       expected: /Permission denied/, absent: /secret-value|private-value|other-secret|github_pat_abcdef|ghp_abcdef|\u001b/ },
-    { error: Object.assign(new Error("Command failed"), { stdout: "Disk full. " + "x".repeat(5000) }), expected: /Disk full.*\n\[truncated\]/ },
+    { error: new Error("Disk full. " + "x".repeat(5000)), expected: /Disk full.*\n\[truncated\]/ },
+    { error: "Installation rejected", expected: /Installation rejected/ },
   ];
   for (const entry of cases) {
     const h = await harness(t);
-    const install = await failingInstaller(h, entry.error);
-    await assert.rejects(install("unused.vsix"), (error) => {
+    h.vscode.commands.executeCommand = async () => { throw entry.error; };
+    await assert.rejects(installVsix(h.vscode, h.context, "unused.vsix", "darwin"), (error) => {
       assert.ok(error instanceof UpdateError);
       assert.match(error.message, entry.expected);
       if (entry.absent) assert.doesNotMatch(error.message, entry.absent);
@@ -313,25 +353,33 @@ test("installer reports CLI diagnostics, exit status and launch errors without e
       return true;
     });
   }
-  await assert.rejects(installVsix({ env: { appRoot: "/missing-app" } }, {}, "unused"), /CLI installation failed.*ENOENT.*\n.*product.json/);
 });
 
-test("actual installer diagnostics reach manual warnings and background logs without marking installation complete", async (t) => {
+test("actual command failures reach manual warnings and background logs without marking installation complete", async (t) => {
   for (const manual of [true, false]) {
     const h = await harness(t);
-    const install = await failingInstaller(h, Object.assign(new Error("Command failed"), {
-      code: 1, stderr: "Cannot install extension: incompatible VS Code version.",
-    }));
-    const updater = createUpdater(h.context, h.vscode, { ...h.dependencies, install });
+    h.vscode.commands.executeCommand = async () => {
+      throw Object.assign(new Error("Cannot install extension: incompatible VS Code version. token=private-value"), { code: "Incompatible" });
+    };
+    const dependencies = { ...h.dependencies, install: undefined };
+    const updater = createUpdater(h.context, h.vscode, dependencies);
     t.after(() => updater.dispose());
     await updater.check(manual);
-    assert.match(h.logs.join("\n"), /code 1.*\nCannot install extension: incompatible VS Code version/);
+    assert.match(h.logs.join("\n"), /code Incompatible.*\nCannot install extension: incompatible VS Code version/);
     if (manual) {
       assert.equal(h.messages[0].warning, true);
       assert.match(h.messages[0].message, /Cannot install extension: incompatible VS Code version/);
     } else assert.equal(h.messages.length, 0);
+    assert.doesNotMatch(JSON.stringify([h.logs, h.messages]), /private-value/);
     assert.equal((await readState(h.stateDirectory)).installedVersion, undefined);
     assert.deepEqual(await fs.readdir(h.stateDirectory), ["state.json"]);
+    const restarted = createUpdater(h.context, h.vscode, dependencies);
+    t.after(() => restarted.dispose());
+    await restarted.check();
+    assert.equal(h.calls.latest, 1, "failed command installations remain throttled across restarts");
+    h.vscode.commands.executeCommand = async () => {};
+    await restarted.check(true);
+    assert.equal((await readState(h.stateDirectory)).installedVersion, "0.0.11", "manual retry can finish the installation");
   }
 });
 
