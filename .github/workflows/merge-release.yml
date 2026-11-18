@@ -1,7 +1,7 @@
 name: Tag merged release PR
 
 on:
-  pull_request_target:
+  pull_request:
     branches: [main]
     types: [closed]
 
@@ -14,8 +14,8 @@ concurrency:
 
 jobs:
   tag:
-    if: github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: write

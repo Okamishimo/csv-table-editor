@@ -100,7 +100,7 @@ test("a merged PR tags its exact commit once, retries safely and never tags a la
   const commit = "a".repeat(40);
   const later = "b".repeat(40);
   const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
-    title: "Release v0.0.16: release policy", merge_commit_sha: commit };
+    head: { repo: { full_name: repository } }, title: "Release v0.0.16: release policy", merge_commit_sha: commit };
   const mutations = [];
   let existing = null;
   let onMain = true;
@@ -163,6 +163,8 @@ test("only a release PR moves the version, and it must move all three fields", (
   // Feature and Fix leave the version alone, and never look up a tag.
   assert.deepEqual(checkPr("Feature: add a thing", base, head, git), { kind: "feature" });
   assert.deepEqual(checkPr("Fix: correct a thing", base, head, git), { kind: "fix" });
+  assert.deepEqual(checkPr("Feature: fork contribution", base, head, git, "other/repo"), { kind: "feature" });
+  assert.deepEqual(checkPr("Fix: fork contribution", base, head, git, "other/repo"), { kind: "fix" });
 
   // A release PR that forgot the bump is refused before anything else.
   assert.throws(() => checkPr("Release v0.0.15: no bump", base, head, git),
@@ -225,6 +227,18 @@ test("release PR checks still require a newer matching version and an unused tag
   assert.throws(() => checkPr("Release v0.0.17: x", base, head, git), /must match/);
 });
 
+test("release PRs from forks fail before Git or GitHub access, including a missing source repository", () => {
+  const repository = "Okamishimo/csv-table-editor";
+  const commit = "a".repeat(40);
+  const forbidden = () => assert.fail("unpublishable releases must fail before Git or GitHub access");
+  for (const headRepository of ["other/csv-table-editor", ""]) {
+    assert.throws(() => checkPr("Release v0.0.16: x", commit, "b".repeat(40), forbidden, headRepository), /branch in this repository/);
+    const pr = { merged: true, base: { ref: "main", repo: { full_name: repository } },
+      head: { repo: { full_name: headRepository } }, title: "Release v0.0.16: x", merge_commit_sha: commit };
+    assert.throws(() => tagMergedPr(pr, repository, forbidden, forbidden), /branch in this repository/);
+  }
+});
+
 test("workflow wiring validates ancestry before publication and calls release explicitly after tagging", () => {
   const read = (name) => fs.readFileSync(path.join(__dirname, "..", ".github", "workflows", name), "utf8");
   const release = read("private-release.yml");
@@ -232,13 +246,17 @@ test("workflow wiring validates ancestry before publication and calls release ex
   assert.match(release, /fetch-depth: 0/);
   assert.ok(release.indexOf("release-policy.js check-tag") < release.indexOf("private-release.js prepare"));
   const merge = read("merge-release.yml");
+  assert.match(merge, /on:\n  pull_request:\n    branches: \[main\]\n    types: \[closed\]/);
+  assert.doesNotMatch(merge, /pull_request_target/);
   assert.match(merge, /if: github.event.pull_request.merged == true/);
+  assert.match(merge, /github.event.pull_request.head.repo.full_name == github.repository/);
   assert.match(merge, /ref: \$\{\{ github.event.pull_request.merge_commit_sha \}\}/);
   assert.match(merge, /uses: \.\/.github\/workflows\/private-release.yml/);
   assert.match(merge, /needs: tag/);
   assert.match(merge, /if: needs.tag.outputs.kind == 'release'/);
   assert.match(merge, /kind: \$\{\{ steps.tag.outputs.kind \}\}/);
   assert.match(read("pull-request.yml"), /reopened, edited/);
+  assert.match(read("pull-request.yml"), /PR_HEAD_REPOSITORY: \$\{\{ github.event.pull_request.head.repo.full_name \}\}/);
   assert.match(read("pull-request.yml"), /run: npm run verify/);
   const verify = read("pull-request.yml").split("  verify:\n")[1];
   assert.match(verify, /needs: policy/);
@@ -247,5 +265,12 @@ test("workflow wiring validates ancestry before publication and calls release ex
     assert.match(step, /if: needs.policy.outputs.kind (?:==|!=) 'docs'/);
     // Only documentation skips the suite; Feature, Fix and Release all run it.
     if (/npm ci|npm run verify|actions\//.test(step)) assert.match(step, /if: needs.policy.outputs.kind != 'docs'/);
+  }
+  for (const name of ["merge-release.yml", "private-release.yml", "pull-request.yml"]) {
+    const workflow = read(name);
+    const runners = [...workflow.matchAll(/runs-on: (\S+)/g)].map((match) => match[1]);
+    assert.ok(runners.length > 0);
+    assert.ok(runners.every((runner) => runner === "ubuntu-26.04"), "runner OS must not migrate implicitly");
+    assert.doesNotMatch(workflow, /ubuntu-latest/);
   }
 });

@@ -10,12 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Replace the merged-release workflow's `pull_request_target` trigger with
+  guarded `pull_request: closed` execution, avoiding GitHub's upcoming default
+  block. Release PRs must use a branch in this repository so publication retains
+  write permissions; Feature, Fix and Docs PRs may still come from forks.
 - Install GitHub Release VSIX updates through VS Code's documented built-in
   command on macOS and Windows, avoiding executable-path errors such as
   `ENOENT` for `<commit>\Code.exe` on Windows with versioned resources.
 
 ### Changed
 
+- Request `@Okamishimo` review for npm manifest/lockfile and Actions workflow
+  changes through CODEOWNERS, including future Dependabot update PRs.
+- Pin all GitHub Actions jobs to `ubuntu-26.04` to avoid implicit runner OS
+  migrations and the `ubuntu-latest` migration notice.
 - Let VS Code handle the current update profile and remove the CLI-only
   `csvTableEditor.updates.profileName` setting.
 - Fail `npm run verify`, including pre-commit and full CI checks, on Node

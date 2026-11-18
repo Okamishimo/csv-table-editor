@@ -12,6 +12,8 @@ The workflow is [`.github/workflows/private-release.yml`](../.github/workflows/p
 
 Develop on a topic branch and merge through a PR; GitHub refuses direct pushes to `main`. New behavior uses `Feature: description` and corrections use `Fix: description`. Neither changes the version, and merging one creates no tag or Release; the work waits on main until a release publishes it. Release PRs into `main` must be named `Release vX.Y.Z: description`, for example `Release v0.0.16: protect the release workflow`. The stable version must match `package.json` and both root version fields in `package-lock.json`, be newer than main, and not already have a tag. `PR policy` and `Verify` checks validate these rules and run the complete build, tests, and patch idempotency check. Editing the PR title reruns the checks.
 
+Release PRs must originate from a branch in `Okamishimo/csv-table-editor`. Fork-originated Release PRs fail policy checks because the normal `pull_request` event cannot obtain the write token needed to publish. Feature, Fix and Docs PRs can still come from forks.
+
 For Feature, Fix and Release PRs, the `Verify` job shows separate **Build**, **Tests**, and **Patch idempotency** steps. Each invokes the corresponding `npm run verify -- --step ...` selection once, using the same warning handling and commands as the complete local verification. All three must succeed for `Verify` to pass.
 
 Documentation-only PRs use `Docs: description`, for example `Docs: clarify the release guide`. They require no version bump and create no tag or Release after merging. Quick CI checks validate the full PR diff against a strict documentation allowlist and run `git diff --check`; no dependency install or full test suite is needed for this PR type. `Verify` records the successful quick checks while retaining the same required check names as Release PRs.
@@ -26,9 +28,13 @@ Update PR titles start with `Fix:` to pass the existing PR policy. They run full
 
 Dependabot reads this file from the default branch, so a configuration change takes effect after it reaches `main`.
 
+The [CODEOWNERS file](../.github/CODEOWNERS) requests review from `@Okamishimo` for changes to the root npm manifest/lockfile and GitHub Actions workflows, covering both Dependabot ecosystems. GitHub removed Dependabot's `reviewers` option; [code owners are the supported replacement](https://github.blog/changelog/2025-08-08-dependabot-reviewers-configuration-option-is-replaced-by-code-owners/). These path rules also apply to other authors' PRs touching those files. Automatic requests use the CODEOWNERS file on the PR's base branch, so this takes effect once it is merged into `main`. This requests review without adding an approval requirement to repository protection.
+
 ## Working locally
 
 Use Node 26 for development and verification, as the workflows do. The current jsdom requires a recent Node runtime, and Node 26 provides stable mock timers for warning-free tests. VSCE 4 and the current VS Code types are used together; the extension's declared minimum VS Code version matches the types.
+
+All workflow jobs pin `ubuntu-26.04` so changes to the `ubuntu-latest` label cannot silently change the runner OS.
 
 Install dependencies with `npm ci` after cloning. This also installs the tracked Git hooks; existing checkouts can use `npm run hooks:install`. Before each commit, the hook runs `npm run verify` on an isolated copy of the **staged** files using the checkout's installed dependencies. Unstaged fixes cannot hide failures in the commit. If the build changes the staged vendor distribution, run `npm run build` and stage the generated change before retrying. The working tree and index are left intact. Keep installed dependencies current with `npm ci`.
 
@@ -50,7 +56,7 @@ gh pr create --base main --title "Release v0.0.16: protect the release workflow"
 
 ## Tagging and publication
 
-After a Release PR is merged, `merge-release.yml` tags its exact merge commit and calls `private-release.yml` directly. This works with `GITHUB_TOKEN` alone: [tags created with that token do not trigger another push workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow). A retry reuses an existing tag only when it points to the same commit; it never moves a tag. Merely closing a PR does not create a tag.
+After a Release PR is merged, `merge-release.yml` tags its exact merge commit and calls `private-release.yml` directly. It uses `pull_request` with activity type `closed`, guarded by `merged == true` and a same-repository source branch, and checks out only the merged commit. It does not use `pull_request_target` or require an exception to GitHub's default policy for that event. This works with `GITHUB_TOKEN` alone: [tags created with that token do not trigger another push workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow). A retry reuses an existing tag only when it points to the same commit; it never moves a tag. Merely closing a PR does not create a tag.
 
 Manual `v*` tag pushes and published Releases also invoke the release workflow. All release paths check that the tag's commit is already reachable from remote main before preparing assets. The pre-push hook blocks direct main pushes and rejects all tag pushes outside freshly fetched `origin/main`, along with tag deletions/replacements. A tag identifies a commit, not a branch: a commit already merged into main is allowed even if another branch also contains it.
 
