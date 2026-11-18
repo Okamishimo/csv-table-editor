@@ -33,9 +33,12 @@ function versionsAt(sha, runGit) {
   return { manifest, lock, fields: [manifest.version, lock.version, lock.packages?.[""]?.version] };
 }
 
-function checkPr(title, baseSha, headSha, runGit = git) {
+function checkPr(title, baseSha, headSha, runGit = git, headRepository = REPOSITORY) {
   if (![baseSha, headSha].every((sha) => /^[a-f0-9]{40}$/.test(sha || ""))) throw new Error("Missing PR base or head commit.");
   const kind = prKind(title);
+  if (kind === "release" && headRepository !== REPOSITORY) {
+    throw new Error("Release PRs must use a branch in this repository so the merged workflow can publish with write permissions.");
+  }
   if (kind === "docs") return { kind, files: checkDocumentation(baseSha, headSha, runGit) };
 
   const base = versionsAt(baseSha, runGit);
@@ -104,10 +107,13 @@ function tagMergedPr(pr, repository, runGit = git, createRef = (tag, commit) => 
       pr.base.repo?.full_name !== REPOSITORY || !/^[a-f0-9]{40}$/.test(pr.merge_commit_sha || "")) {
     throw new Error("Only a merged PR into this repository's main can create a release tag.");
   }
-  const commit = assertOnMain(pr.merge_commit_sha, runGit);
   // Only a release publishes. Everything else merges and stops there, without
   // reading a version or reaching the tag API at all.
   const kind = prKind(pr.title);
+  if (kind === "release" && pr.head?.repo?.full_name !== REPOSITORY) {
+    throw new Error("Release PRs must use a branch in this repository.");
+  }
+  const commit = assertOnMain(pr.merge_commit_sha, runGit);
   if (kind !== "release") return { kind, tag: "", commit };
   const manifest = JSON.parse(runGit(["show", `${commit}:package.json`]));
   const lock = JSON.parse(runGit(["show", `${commit}:package-lock.json`]));
@@ -118,7 +124,8 @@ function tagMergedPr(pr, repository, runGit = git, createRef = (tag, commit) => 
 
 function main(command = process.argv[2]) {
   if (command === "pr") {
-    const result = checkPr(process.env.PR_TITLE, process.env.PR_BASE_SHA, process.env.PR_HEAD_SHA);
+    const result = checkPr(process.env.PR_TITLE, process.env.PR_BASE_SHA, process.env.PR_HEAD_SHA, git,
+      process.env.PR_HEAD_REPOSITORY || "");
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${result.kind}\n`);
     console.log(
       result.kind === "docs" ? `Documentation scope and whitespace checks passed for ${result.files} files.`

@@ -500,8 +500,15 @@ actually changed.
 
 ## Documentation
 
-Update `readme.md` when user-visible behavior, settings, limits, or usage
-changes. The subjects too long for it have a page each under `docs/`:
+Keep documentation concise. Edit it only when a meaningful user-facing change
+makes existing instructions inaccurate or the user asks for documentation work.
+Routine fixes and internal changes do not require documentation or changelog
+entries. Replace or shorten existing text rather than appending a note for every
+change. Keep implementation details, test reports, CI, dependencies, reviewers
+and development history out of user guides and release notes; maintainer-only
+instructions belong in `docs/releasing.md` or the canonical release rules.
+
+The subjects too long for `readme.md` have a page each under `docs/`:
 `docs/large-files.md` for the streaming preview, `docs/updates.md` for the
 automatic updater, and `docs/releasing.md` for the release workflow and
 repository protection. Change the page that owns the subject instead of
@@ -512,12 +519,15 @@ of nothing else; the pages under `docs/` are English. When a change alters the
 readme's own sections, alter the translation with it, and say plainly if you
 have left it behind.
 
-Add unreleased changes to the `[Unreleased]` section of `changelog.md`.
+Record only meaningful user-facing changes in `changelog.md`, briefly, under
+`[Unreleased]` until a release is prepared. Do not add an entry for every edit.
 Keep descriptions aligned with the row/column terminology above.
 
 ## Packaging and Releases
 
-Do not create a VSIX unless the user explicitly asks for packaging.
+Packaging runs on GitHub Actions through a Release PR by default. Do not create
+a local VSIX unless the user explicitly requests a local artifact; a request to
+package or release alone means preparing the GitHub release flow.
 
 `npm run package` is an alias for `npm run verify`; it does not itself create a
 VSIX. To create the installable artifact, run `npm run verify` and then the local

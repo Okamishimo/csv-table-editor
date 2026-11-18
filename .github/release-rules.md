@@ -34,6 +34,9 @@ authorize commits, pushes, merges, or publication. Follow the current task scope
   example `Release v0.0.16: protect the release workflow`.
 - Use stable semantic versions without zero padding, prerelease identifiers, or
   build metadata.
+- Release PRs must originate from a branch in this repository. The merged
+  workflow uses the ordinary `pull_request` event, whose token cannot publish
+  for fork-originated PRs. Feature, Fix and Docs PRs may still come from forks.
 - The title version must exactly match `package.json`'s `version`, the root
   `version` in `package-lock.json`, and its `packages[""].version`.
 - The version must exceed the PR's main base version and have no existing tag.
@@ -137,6 +140,8 @@ Topic branch -> staged verification -> commit -> push
 ```
 
 - [merge-release.yml](workflows/merge-release.yml) handles merged PRs into main.
+  It uses `pull_request: closed` with merged and same-repository guards, not
+  `pull_request_target`, and checks out only the exact merged commit.
   Closing an unmerged PR does not create a tag. A merged Docs, Feature, or Fix PR
   reports that publication is skipped and never calls the tag API or release
   workflow, nor does it read a version.
@@ -153,8 +158,8 @@ Topic branch -> staged verification -> commit -> push
   deployed. Local files or passing unit tests do not prove a successful Actions run.
 - Never overwrite release tags or assets. Follow AGENTS.md's GitHub Actions
   Publication and Recovery section for retries, complete drafts, and partial uploads.
-- Do not create a local VSIX unless packaging was requested. Once configured,
-  merging a release PR triggers packaging and publication through the workflow.
+- Packaging runs on GitHub Actions after a Release PR merges. Create a local
+  VSIX only when the user explicitly requests a local artifact.
 
 ## Server protection and known limits
 

@@ -74,16 +74,18 @@ committing, pushing, creating or merging a PR, tagging, packaging, or publishing
 - Do not run `npm version` for a check-only request. When asked to prepare a new
   version, update the manifest and lockfile together without automatically
   committing or tagging.
-- Check that `readme.md` reflects user-visible changes and `changelog.md` is
-  complete. Keep ordinary pending changes under `[Unreleased]`; organize a dated
-  version entry when explicitly preparing that release, retaining `[Unreleased]`.
+- Check documentation only for meaningful user-facing changes that make current
+  instructions inaccurate. Keep release notes brief and user-facing; omit
+  routine fixes and internal maintenance. Put pending notes under `[Unreleased]`
+  and move them to a dated version entry when preparing the release.
 - Check for an existing tag, published/draft Release, and local canonical VSIX
   for the target version. Never overwrite or move existing artifacts; a changed
   build needs a new version. For failed-release recovery, first read AGENTS.md's
   recovery instructions and inspect asset completeness. Do not immediately
   repackage or rerun an old tag.
-- Create no local VSIX unless packaging was explicitly requested. When it was,
-  follow AGENTS.md's verification, filename, contents, size, and SHA-256 rules.
+- Packaging defaults to GitHub Actions through a Release PR. Create no local
+  VSIX unless a local artifact was explicitly requested; then follow AGENTS.md's
+  verification, filename, contents, size, and SHA-256 rules.
 
 ## Run the required verification
 

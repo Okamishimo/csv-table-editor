@@ -1,21 +1,22 @@
-# Large files and the read-only preview
+# Large files
 
-How the extension behaves when a file is too large to hold in an editable grid. Back to the [readme](../readme.md).
+[Back to readme](../readme.md)
 
-The editable grid is an in-memory editor. Local files larger than 64 MiB open in a streaming, read-only preview instead. Scrolling near either end loads the adjacent 100 rows, so you can move forward and backward without keeping the complete file in memory. The visible table stays bounded to 500 rows and lets you change the detected encoding.
+Local files above `csvTableEditor.maxFileSizeMB` (default **64 MiB**) open in a read-only streaming preview.
 
-The preview reads the whole file before you browse it. A progress bar reports that read; while it runs the table is covered and search is unavailable, because the length of the file, and therefore the meaning of the scrollbar, is not yet known. Choosing another encoding reads the file again. A file that cannot be read through is still previewed, with the scrollbar bounded to the loaded window.
+- The initial scan shows progress and must finish before scrolling or searching. Changing encoding starts a new scan. If indexing fails, the preview remains available within the loaded window.
+- Once scanned, the scrollbar covers the whole file. Drag to a position and pause to load it; the status line shows the target row while dragging.
+- Typing highlights loaded rows. **Enter** searches downward through the file from the visible row; press again for the next match. **Shift+Enter** returns to previously found matches. Search does not wrap.
+- A column header limits search to that column; row-number highlighting does not change the scope. Clicking a data cell clears a whole-column selection.
+- Double-click a cell to expand or collapse its preview text.
 
-Once the read has finished the scrollbar spans the whole file: everything outside the loaded window is shown as placeholder space, so the thumb tells you how far from the end you are. Dragging it anywhere loads that part of the file directly, and the status line reads `Rows 4,902–5,401 of 12,480,913`.
+## Limits
 
-A browser will not lay out a page taller than about 33 million pixels, which is roughly a million rows. A file taller than that shares a scroller of a size the browser can draw between the placeholders instead, so the thumb keeps measuring the whole file however long it is: halfway down the bar is halfway through the file, and the bottom of the bar is the end of it. The loaded rows always keep their real height, so reading through the window is unaffected.
+| Item | Limit |
+| --- | --- |
+| Loaded window | 500 rows |
+| Displayed columns | 100 |
+| Preview text | 4,096 characters per cell; 32,768 per row |
+| Full editing | 511 MiB |
 
-Columns stay 200 pixels wide regardless of the text in each page. Long text is clipped, and cells containing line breaks show one and a half lines by default. Double-click any cell to wrap and expand its preview text within that fixed width, and double-click again to collapse it. Expansion lasts while the row remains in the loaded window; the existing preview text limits still apply. Collapsed rows reserve the same height so the unloaded parts of the file can be positioned accurately.
-
-The row-number column stays compact and reserves space for the whole file's largest row number once its count is known, so paging does not resize it.
-
-Rows are loaded for where you stop, not for everywhere you passed: a wheel or trackpad gesture, and a scrollbar drag, load one window once the scroller has come to rest. On a file of this size a scrollbar is coarse — a pixel of pointer movement is worth several hundred rows — so while you are still dragging the status line names the row the thumb is over, letting you aim before you let go. The wait for the scroller to rest is long enough to outlast the tremor of a hand holding the thumb, which would otherwise load a window of its own several times a second. Landing somewhere new brings 200 rows at once, and if the screen is taller than that the preview keeps reading downward until it is filled, so a fast scroll never leaves you looking at a few rows above blank space.
-
-Typing highlights the rows already loaded. Press **Enter** to search downward from the first visible row, continuing beyond the loaded window and stopping at the first matching cell; the preview loads that part of the file and jumps to it. Enter again reads on for the next match below, and **Shift+Enter** walks back through the ones already found. The search never wraps to the top of the file: at the end it says so and stays there. Clicking a column header limits the search to that column. Loading adjacent pages keeps the visible record at the same screen position, including when older rows leave the window or a search is active.
-
-For files no larger than 511 MiB, **Enable Editing** can explicitly reopen the full in-memory grid after a warning. Files above that JavaScript hard limit, including multi-gigabyte CSV files, remain in the streaming preview. Adjust the automatic preview threshold with `csvTableEditor.maxFileSizeMB`.
+Preview limits do not modify the source file. **Enable Editing** can open files up to 511 MiB in memory after a warning; larger files remain read-only.

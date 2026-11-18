@@ -1,0 +1,4 @@
+# Request reviews for npm and GitHub Actions dependency updates.
+/package.json @Okamishimo
+/package-lock.json @Okamishimo
+/.github/workflows/ @Okamishimo
