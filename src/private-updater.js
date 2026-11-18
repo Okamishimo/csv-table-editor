@@ -62,11 +62,11 @@ async function writeState(directory, state) {
 }
 
 function createUpdater(context, vscode, dependencies = {}) {
+  const platform = dependencies.platform || process.platform;
   const client = dependencies.client || createClient();
-  const install = dependencies.install || ((file) => installVsix(vscode, context, file));
+  const install = dependencies.install || ((file) => installVsix(vscode, context, file, platform));
   const verify = dependencies.verify || verifyVsixManifest;
   const now = dependencies.now || Date.now;
-  const platform = dependencies.platform || process.platform;
   const output = vscode.window.createOutputChannel("CSV Table Editor Updates");
   // Keep the existing directory so throttling, locks and installed state survive upgrades.
   const directory = path.join(context.globalStorageUri.fsPath, "private-updates");
@@ -119,7 +119,7 @@ function createUpdater(context, vscode, dependencies = {}) {
         if (actualHash !== expectedHash) throw new UpdateError("The downloaded VSIX failed SHA-256 verification.");
         await verify(file, manifest, release.version);
         if (disposed || !manual && !configuration().get("enabled", true)) return {};
-        log(`Installing verified version ${release.version} using the VS Code CLI.`);
+        log(`Installing verified version ${release.version} using VS Code's built-in extension installation command.`);
         await install(file);
         state.installedVersion = release.version;
         await writeState(directory, state);

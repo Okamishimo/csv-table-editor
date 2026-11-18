@@ -86,8 +86,8 @@ into the original runtime by `scripts/patch-distribution.js`.
   streaming downloads with restricted redirects and sanitized errors.
 - `src/update-artifact.js`: Stable version comparison, release asset selection,
   checksum parsing, and bounded VSIX manifest validation.
-- `src/update-installer.js`: Invokes the running VS Code installation's CLI
-  using the correct local user-data, extension directory, and profile.
+- `src/update-installer.js`: Invokes VS Code's documented built-in VSIX
+  installation command in the current window and profile.
 - `test/`: Node test runner and JSDOM integration tests.
 - `package.json`: VS Code manifest, settings, dependencies, and scripts.
 - `readme.md` and `changelog.md`: User-facing behavior and release notes. Use
@@ -432,17 +432,19 @@ cache instead of reusing data decoded with the previous encoding.
   Keep metadata/checksum limits and redirect limits. Allow only the configured
   repository's HTTPS GitHub API paths and approved asset hosts. Reject unexpected
   hosts and preserve sanitized errors.
-- Use the running app's CLI via `execFile` with separate arguments and
-  `shell: false`; do not depend on PATH or build a Windows shell command string.
-  Preserve the current user-data and extension directories. Named profiles require
-  the exact `csvTableEditor.updates.profileName`; default profiles need no value.
+- Install verified VSIX files with the documented
+  `workbench.extensions.installExtension` command and `vscode.Uri.file(...)`.
+  Pass a URI rather than a string, which VS Code interprets as a Marketplace ID.
+  Let VS Code manage the current installation and profile; do not locate an
+  executable, launch a CLI, or require a profile-name setting. Await completion
+  before recording success, deleting the download, or releasing the install lock.
 - Updater installation supports local production extension hosts on macOS and
   Windows. Preserve the remote/development-host guards. Release the lock before
   showing Reload/Later, and avoid repeated automatic prompts for the same version.
 - Update failures must leave the editor usable and log to
   `CSV Table Editor Updates`. Keep checksums and failed downloads from becoming
-  an installed-version marker. Tests must stub authentication, network, and CLI
-  installation instead of modifying the user's installed extension.
+  an installed-version marker. Tests must stub authentication, network, and the
+  installation command instead of modifying the user's installed extension.
 - Version 0.0.10 is the first updater-enabled build. Versions through 0.0.9 need
   one manual VSIX upgrade. Older private-updater builds with missing or expired
   credentials also need a manual upgrade to a release containing public updates.
@@ -480,8 +482,8 @@ paths above work on macOS, Linux, and PowerShell.
 
 For updater/release changes, cover authentication isolation, failed-attempt
 throttling across restarts, rate limits, checksum/identity rejection, download
-cleanup, cross-window locking, reload behavior, and macOS/Windows CLI arguments
-as relevant. Release tests must cover creating a draft, finding it again,
+cleanup, cross-window locking, reload behavior, and macOS/Windows installation
+command calls as relevant. Release tests must cover creating a draft, finding it again,
 finishing a fully uploaded draft on retry, and refusing partial-asset overwrites.
 Unit tests must not publish real releases. Distinguish mocked platform checks
 from actual installation or GitHub Actions verification when reporting results.
