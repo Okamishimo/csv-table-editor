@@ -4,7 +4,9 @@
 
 These instructions apply to the entire repository.
 
-This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+Prefer official APIs, built-in capabilities and mature existing solutions.
+Check these before writing custom code. Implement custom behavior only for a
+concrete unmet requirement, and briefly explain why existing options do not fit.
 
 ## Pull Requests, Commits, and Tags
 
