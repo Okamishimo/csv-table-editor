@@ -4,6 +4,8 @@ User-facing changes to CSV Table Editor — Encoding & History.
 
 ## [Unreleased]
 
+- Use the first row for column titles and keep column delete buttons visible beside long titles.
+
 ## [0.0.25] - 2026-11-18
 
 - Fix extension updates failing on Windows with `ENOENT`.

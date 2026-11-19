@@ -97,6 +97,28 @@ test("stream pager keeps only a bounded page and retains the header", async () =
   }
 });
 
+test("streaming titles use the first row even when it is sparse or contains data", async (t) => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-first-row-"));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  for (const [index, text, header, rows] of [
+    [0, "report,,\nid,name,city\n1,Alice,Taipei", ['report', '', ''], [['id', 'name', 'city'], ['1', 'Alice', 'Taipei']]],
+    [1, "Alice,Taipei\nBob,Tokyo", ['Alice', 'Taipei'], [['Bob', 'Tokyo']]],
+    [2, "100,200\n300,400", ['100', '200'], [['300', '400']]],
+  ]) {
+    const file = path.join(directory, `${index}.csv`);
+    await fs.promises.writeFile(file, text);
+    const pager = new CsvStreamPager(file, 'utf8', ',', encodingApi);
+    try {
+      const page = await pager.nextPage();
+      assert.deepEqual(page.header, header);
+      assert.deepEqual(page.rows, rows, 'later rows stay in the preview instead of becoming titles');
+      assert.equal(page.startRow, 2);
+    } finally {
+      await pager.close();
+    }
+  }
+});
+
 test("large local files use streaming mode and detect encoding from a sample", async () => {
   const temporaryDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "csv-table-editor-"));
   const filePath = path.join(temporaryDirectory, "traditional.csv");
