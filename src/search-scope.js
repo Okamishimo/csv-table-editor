@@ -12,7 +12,7 @@ function decorateWebviewHtml(html) {
   if (html.includes("function csvHasColumnSearchScope()")) return html;
 
   let decorated = replaceOnce(
-    html,
+    require("./column-headers").decorateWebviewHtml(html),
     '<input id="filter" type="text" placeholder="Filter… (search across all columns)" />',
     '<input id="filter" type="text" placeholder="Find in whole table" />',
     "search input"

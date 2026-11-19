@@ -269,18 +269,84 @@ test("undoing a column deletion restores the sort that deletion cleared", () => 
     "undo brings the sort back with the column");
 });
 
-test("deleting the header row moves the header and undo puts it back", () => {
-  const harness = openGrid("preamble\nid,name\n1,Alice\n2,Bob");
-  const before = harness.grid();
-  const headerBefore = harness.document.getElementById("header-info").textContent;
+test("column titles always use the first row, even when later rows look more like headers", (t) => {
+  for (const [text, expected] of [
+    ["report,,\nid,name,city\n1,Alice,Taipei", ["report", "B", "C"]],
+    ["Alice,Taipei\nBob,Tokyo", ["Alice", "Taipei"]],
+    ["100,200\n300,400", ["100", "200"]],
+    ['"first\nline",<title>&\nlater,values', ["first\nline", "<title>&"]],
+    ["only", ["only"]],
+    ["", ["A"]],
+  ]) {
+    const harness = openGrid(text);
+    t.after(() => harness.window.close());
+    assert.deepEqual(Array.from(harness.document.querySelectorAll('.col-title'), el => el.textContent), expected);
+    assert.equal(harness.document.getElementById('header-info').textContent, 'Column titles: first row');
+    assert.equal(harness.document.querySelector('tr.header-row td').dataset.r, '0');
+    assert.equal(harness.document.querySelector('.preamble-row'), null);
+    harness.click('th[data-rowhead="0"]');
+    assert.equal(harness.document.getElementById('filter').placeholder, 'Find in whole table',
+      'a row-number click never limits search to a column');
+    assert.deepEqual(harness.edits(), [], 'choosing titles and selecting a row do not edit the file');
+  }
+});
 
-  harness.click('[data-delrow="1"]');
+test("column header decoration is idempotent and rejects unknown HTML", () => {
+  const headers = require('../src/column-headers');
+  const html = decoratedGridHtml();
+  assert.equal(headers.decorateWebviewHtml(html), html);
+  assert.throws(() => headers.decorateWebviewHtml('<html></html>'), /Cannot fix column headers/);
+});
+
+test("deleting the first row updates the titles and undo puts them back", (t) => {
+  const harness = openGrid("preamble\nid,name\n1,Alice\n2,Bob");
+  t.after(() => harness.window.close());
+  const before = harness.grid();
+  const titles = () => Array.from(harness.document.querySelectorAll('.col-title'), el => el.textContent);
+  assert.deepEqual(titles(), ['preamble', 'B']);
+
+  harness.click('[data-delrow="0"]');
+  assert.deepEqual(titles(), ['id', 'name']);
   harness.record();
   harness.undo();
 
   assert.deepEqual(harness.grid(), before);
-  assert.equal(harness.document.getElementById("header-info").textContent, headerBefore,
-    "the header position is part of what the operation restores");
+  assert.deepEqual(titles(), ['preamble', 'B']);
+  harness.redo();
+  assert.deepEqual(titles(), ['id', 'name']);
+});
+
+test("long titles leave separate, nonshrinking sort and delete controls", (t) => {
+  const title = 'Very long column title '.repeat(100);
+  const harness = openGrid(`${title},city\nCarol,Osaka\nAlice,Taipei`);
+  t.after(() => harness.window.close());
+  const { document, window } = harness;
+  const before = harness.grid();
+  const heading = document.querySelector('th[data-colhead="0"] .csv-column-heading');
+  const sorter = heading.querySelector('.sort-header');
+  const button = heading.querySelector('[data-delcol="0"]');
+  assert.equal(heading.querySelector('.col-title').textContent, title);
+  assert.equal(button.parentElement, heading, 'delete is outside the sort target');
+  assert.equal(window.getComputedStyle(heading).display, 'flex');
+  assert.equal(window.getComputedStyle(sorter).minWidth, '0px');
+  assert.equal(window.getComputedStyle(heading.querySelector('.col-title')).textOverflow, 'ellipsis');
+  assert.equal(window.getComputedStyle(heading.querySelector('.sort-glyph')).flexShrink, '0');
+  assert.equal(window.getComputedStyle(button).flexShrink, '0');
+
+  harness.click('[data-sortcol="0"] .col-title');
+  assert.equal(document.getElementById('filter').placeholder, 'Find in column ' + title.trim());
+  assert.equal(harness.edits().length, 0, 'the first title click only selects');
+  harness.click('[data-sortcol="0"] .sort-glyph');
+  assert.equal(document.querySelector('.sort-glyph').textContent, '▲');
+  document.querySelector('[data-delcol="0"]').click();
+  harness.record();
+  assert.deepEqual(harness.grid(), [['city'], ['Osaka'], ['Taipei']]);
+  assert.equal(harness.edits().length, 1, 'X deletes once, without invoking selection or sorting');
+  harness.undo();
+  assert.deepEqual(harness.grid(), before);
+  assert.equal(document.querySelector('.col-title').textContent, title);
+  harness.redo();
+  assert.deepEqual(harness.grid(), [['city'], ['Osaka'], ['Taipei']]);
 });
 
 test("a history rollback still travels whole, because the whole grid is the change", () => {
